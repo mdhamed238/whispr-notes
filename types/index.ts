@@ -147,6 +147,6 @@ export const MODEL_CONFIG = {
   NAME: 'whisper-tiny',
   VERSION: 'v1',
   SIZE_MB: 40,
-  URL: 'https://huggingface.co/microsoft/whisper-tiny/resolve/main/model.ptl', // Placeholder URL
+  URL: 'https://huggingface.co/openai/whisper-tiny/resolve/main/pytorch_model.bin',
   LOCAL_PATH: 'models/whisper-tiny.ptl',
 } as const;

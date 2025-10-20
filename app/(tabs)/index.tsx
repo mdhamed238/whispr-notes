@@ -1,8 +1,14 @@
 /**
  * Record Screen
  * Main recording interface with audio recording, playback, and transcription
+ * Updated to use react-native-executorch for on-device AI transcription
  */
 
+import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '@/constants/config';
+import audioService from '@/services/audioService';
+import storageService from '@/services/storageService';
+import transcriptionService, { setGlobalModelInstance } from '@/services/transcriptionService';
+import { TranscriptionItem, TranscriptionProgress } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import React, { useEffect, useRef, useState } from 'react';
@@ -13,20 +19,25 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
+import { useSpeechToText, WHISPER_TINY_EN } from 'react-native-executorch';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '../../constants/config';
-import { audioService } from '../../services/audioService';
-import { modelManager } from '../../services/modelManager';
-import { storageService } from '../../services/storageService';
-import { transcriptionService } from '../../services/transcriptionService';
-import { TranscriptionItem, TranscriptionProgress } from '../../types';
 
 const { width } = Dimensions.get('window');
 
 export default function RecordScreen() {
+  // Initialize the speech-to-text model
+  const speechModel = useSpeechToText({
+    model: WHISPER_TINY_EN,
+  });
+
+  // Set the global model instance for the transcription service
+  useEffect(() => {
+    setGlobalModelInstance(speechModel);
+  }, [speechModel]);
+
   // State management
   const [isRecording, setIsRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -38,11 +49,11 @@ export default function RecordScreen() {
   const [modelAvailable, setModelAvailable] = useState(false);
 
   // Refs
-  const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    // Check model availability on mount
-    checkModelAvailability();
+    // Update model availability when speech model changes
+    setModelAvailable(speechModel.isReady);
     
     return () => {
       // Cleanup on unmount
@@ -51,7 +62,7 @@ export default function RecordScreen() {
       }
       audioService.cleanup();
     };
-  }, []);
+  }, [speechModel.isReady]);
 
   useEffect(() => {
     // Update recording duration during recording
@@ -71,19 +82,6 @@ export default function RecordScreen() {
       }
     };
   }, [isRecording]);
-
-  /**
-   * Check if the AI model is available
-   */
-  const checkModelAvailability = async () => {
-    try {
-      const isAvailable = await modelManager.isModelAvailable();
-      setModelAvailable(isAvailable);
-    } catch (error) {
-      console.error('Failed to check model availability:', error);
-      setModelAvailable(false);
-    }
-  };
 
   /**
    * Format duration in MM:SS format
@@ -290,7 +288,12 @@ export default function RecordScreen() {
         <View style={styles.header}>
           <Text style={styles.title}>Audio Transcription</Text>
           <Text style={styles.subtitle}>
-            {modelAvailable ? 'Ready to transcribe' : 'Model not available'}
+            {speechModel.isReady 
+              ? 'Ready to transcribe' 
+              : speechModel.downloadProgress > 0 
+                ? `Downloading model... ${Math.round(speechModel.downloadProgress * 100)}%`
+                : 'Loading AI model...'
+            }
           </Text>
         </View>
 

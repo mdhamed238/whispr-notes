@@ -1,13 +1,23 @@
 /**
  * Transcription Service
- * Handles on-device transcription using ExecuTorch and Whisper model
+ * Handles on-device transcription using react-native-executorch and Whisper model
  * Provides transcription pipeline with progress tracking and error handling
  */
 
 import { ERROR_MESSAGES, TRANSCRIPTION_CONFIG } from '../constants/config';
 import { TranscriptionError, TranscriptionProgress, TranscriptionServiceInterface } from '../types';
 import { audioService } from './audioService';
-import { modelManager } from './modelManager';
+
+// Global model instance to be managed by React component
+let globalModelInstance: any = null;
+
+export const setGlobalModelInstance = (instance: any) => {
+  globalModelInstance = instance;
+};
+
+export const getGlobalModelInstance = () => {
+  return globalModelInstance;
+};
 
 class TranscriptionService implements TranscriptionServiceInterface {
   private isInitialized: boolean = false;
@@ -32,14 +42,11 @@ class TranscriptionService implements TranscriptionServiceInterface {
       console.log('Initializing transcription service...');
       
       // Check if model is available
-      const isModelAvailable = await modelManager.isModelAvailable();
-      if (!isModelAvailable) {
+      const model = getGlobalModelInstance();
+      if (!model || !model.isReady) {
         throw new Error(ERROR_MESSAGES.MODEL_NOT_FOUND);
       }
 
-      // Load the model
-      await modelManager.loadModel();
-      
       this.isInitialized = true;
       console.log('Transcription service initialized successfully');
     } catch (error) {
@@ -145,7 +152,8 @@ class TranscriptionService implements TranscriptionServiceInterface {
    * @returns boolean - true if model is loaded
    */
   isModelLoaded(): boolean {
-    return this.isInitialized;
+    const model = getGlobalModelInstance();
+    return model && model.isReady;
   }
 
   /**
@@ -188,26 +196,9 @@ class TranscriptionService implements TranscriptionServiceInterface {
    */
   private async runInference(audioData: Float32Array): Promise<string> {
     try {
-      // Simulate inference time based on audio length
-      const audioLengthSeconds = audioData.length / 16000; // Assuming 16kHz sample rate
-      const estimatedTime = Math.max(2000, audioLengthSeconds * 1000); // Minimum 2 seconds
-
-      // Simulate progress updates during inference
-      const startTime = Date.now();
-      const endTime = startTime + estimatedTime;
-
-      while (Date.now() < endTime && !this.abortController?.signal.aborted) {
-        const elapsed = Date.now() - startTime;
-        const progress = Math.min(90, 50 + (elapsed / estimatedTime) * 40);
-        
-        this.updateProgress({
-          stage: 'inference',
-          progress,
-          message: 'Transcribing audio...',
-        });
-
-        // Wait a bit before next update
-        await new Promise(resolve => setTimeout(resolve, 200));
+      const model = getGlobalModelInstance();
+      if (!model || !model.isReady) {
+        throw new Error('Model not ready for transcription');
       }
 
       // Check if cancelled
@@ -215,18 +206,15 @@ class TranscriptionService implements TranscriptionServiceInterface {
         throw new Error('Transcription cancelled');
       }
 
-      // For now, return a mock transcription
-      // In production, this would use react-native-executorch to run the actual model
-      const mockTranscriptions = [
-        "This is a sample transcription of the recorded audio.",
-        "Hello, this is a test recording for the audio transcription app.",
-        "The weather is nice today and I'm testing the transcription feature.",
-        "This is a demonstration of the on-device speech recognition capabilities.",
-        "Welcome to the audio transcription app powered by ExecuTorch and Whisper.",
-      ];
+      // Use the real react-native-executorch model for transcription
+      const transcription = await model.transcribe(audioData);
 
-      const randomIndex = Math.floor(Math.random() * mockTranscriptions.length);
-      return mockTranscriptions[randomIndex];
+      // Check if cancelled after transcription
+      if (this.abortController?.signal.aborted) {
+        throw new Error('Transcription cancelled');
+      }
+
+      return transcription;
 
     } catch (error) {
       console.error('Inference failed:', error);
