@@ -26,6 +26,16 @@
       "android": {
         "buildType": "apk"
       }
+    },
+    "local-android": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease"
+      },
+      "env": {
+        "EXPO_DEBUG": "false"
+      }
     }
   },
   "submit": {

@@ -7,15 +7,15 @@ import storageService from '@/services/storageService';
 import { TranscriptionItem } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  Alert,
-  Dimensions,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View
+    Alert,
+    Dimensions,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import { AudioManager, AudioRecorder } from 'react-native-audio-api';
 import { useSpeechToText, WHISPER_TINY_EN } from 'react-native-executorch';
