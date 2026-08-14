@@ -2,16 +2,15 @@
 
 A sophisticated React Native application that provides **on-device AI-powered audio transcription** using Whisper model integration. Record audio, transcribe speech to text locally, and manage your transcriptions - all without sending data to the cloud.
 
-## ✨ Key Features
+## Features
 
-- 🤖 **On-Device AI**: Local transcription using Whisper Tiny model via react-native-executorch
-- 🎵 **High-Quality Audio**: Optimized 16kHz mono recording for AI compatibility
-- 📱 **Cross-Platform**: Native iOS and Android support with Expo
-- 🔒 **Privacy-First**: Complete local processing, no cloud dependencies
-- ⚡ **Real-Time Progress**: Live transcription progress with 4-stage pipeline
-- 💾 **Local Storage**: Save and manage transcriptions locally
-- 🎯 **Haptic Feedback**: Enhanced UX with tactile responses
-- ♿ **Accessible**: Screen reader support and keyboard navigation
+- **Live streaming transcription** — audio is captured in 100 ms chunks and streamed straight into the Whisper model as you speak, with committed and in-progress (interim) text shown separately.
+- **On-device inference** — runs fully offline through ExecuTorch; no server, no API keys, no network calls.
+- **Notes** — recordings are saved as editable notes: title, transcript, and freeform tags, all editable after the fact. Pin the ones you want to keep at the top.
+- **Audio playback** — each note keeps the actual recording (captured to an M4A file alongside the live transcription) so you can play it back from the note.
+- **Search** — filter notes by title, transcript text, or tag.
+- **Export & share** — export any note as `.txt`, `.json`, or `.srt` and share it through the native share sheet.
+- **Haptic feedback** on start/stop/save for a more tactile recording experience.
 
 ## 🚀 Quick Start
 
@@ -94,8 +93,8 @@ npm run android # Android device (not emulator)
 1. **🎙️ Record**: Tap to start recording audio with real-time duration tracking
 2. **🔄 Process**: Audio is preprocessed to 16kHz mono format for AI compatibility
 3. **🤖 Transcribe**: Whisper model runs locally to convert speech to text
-4. **💾 Save**: Store transcriptions locally with metadata and timestamps
-5. **📤 Export**: Share or export transcriptions in multiple formats
+4. On stop, the same audio samples fed to the model are also encoded into a real WAV file on-device — the note is saved with the real audio duration and a link to that file.
+5. The Notes tab lists saved notes; tap one to edit its title/transcript/tags, play back the audio, export, or delete it.
 
 ## 🎨 Screenshots
 
@@ -119,28 +118,28 @@ npm run android # Android device (not emulator)
 - **⏱️ Real-Time**: ~3x real-time processing speed (device-dependent)
 - **🔋 Battery Optimized**: Efficient CPU/NPU utilization on supported hardware
 
-## 🛠️ Development
+## Project Structure
 
-### Project Structure
 ```
 app/
-├── (tabs)/
-│   └── index.tsx          # Main recording interface
+├── _layout.tsx              # Root stack + font loading
+├── note/[id].tsx             # Note Detail modal — edit, tags, pin, playback, export, delete
+└── (tabs)/
+    ├── _layout.tsx           # Tab navigator (Record / Notes)
+    ├── index.tsx             # Record screen — capture + live transcription
+    └── notes.tsx              # Notes screen — search, pinned section, cards
+
 services/
-├── audioService.ts        # Audio recording/processing
-├── transcriptionService.ts # AI transcription pipeline
-└── storageService.ts      # Data persistence
-types/
-└── index.ts              # TypeScript definitions
+└── storageService.ts        # AsyncStorage persistence, export (txt/json/srt), sharing
+
 constants/
-└── config.ts             # App configuration
+├── config.ts                 # Audio, storage, and export configuration
+├── Colors.ts                  # Light/dark theme tokens
+└── Spacing.ts                 # Shared spacing/font-size scale
+
+types/
+└── index.ts                  # Shared TypeScript types
 ```
-
-### Key Services
-
-- **AudioService**: Handles recording, playback, and Whisper-compatible preprocessing
-- **TranscriptionService**: Manages AI model lifecycle and inference pipeline
-- **StorageService**: Local data persistence and export functionality
 
 ## 🔒 Privacy & Security
 
