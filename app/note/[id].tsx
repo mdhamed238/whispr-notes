@@ -10,7 +10,7 @@ import storageService from '@/services/storageService';
 import { Note } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
@@ -35,6 +35,7 @@ function formatTime(seconds: number): string {
 export default function NoteDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const navigation = useNavigation();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const styles = createStyles(colors);
@@ -46,6 +47,16 @@ export default function NoteDetailScreen() {
   const [tags, setTags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState('');
   const [pinned, setPinned] = useState(false);
+
+  // Bug fix: the title and transcript fields used to share one debounce
+  // timer keyed to whichever field changed last — editing the title, then
+  // switching to the transcript within 800ms, silently cancelled the
+  // title's pending save with no way to recover it. This ref always holds
+  // the latest values of BOTH fields, and every autosave (scheduled or
+  // flushed) persists both together, so no edit is ever dropped by
+  // switching fields.
+  const latestFieldsRef = useRef({ title, transcription });
+  latestFieldsRef.current = { title, transcription };
 
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -85,21 +96,55 @@ export default function NoteDetailScreen() {
     });
   };
 
-  const scheduleAutosave = (updates: Partial<Note>) => {
+  const flushPendingSave = () => {
+    if (autosaveTimer.current) {
+      clearTimeout(autosaveTimer.current);
+      autosaveTimer.current = null;
+      persist(latestFieldsRef.current);
+    }
+  };
+
+  const scheduleAutosave = () => {
     if (autosaveTimer.current) {
       clearTimeout(autosaveTimer.current);
     }
-    autosaveTimer.current = setTimeout(() => persist(updates), AUTOSAVE_DELAY_MS);
+    autosaveTimer.current = setTimeout(() => {
+      autosaveTimer.current = null;
+      persist(latestFieldsRef.current);
+    }, AUTOSAVE_DELAY_MS);
   };
+
+  // Bug fix: closing the modal via swipe-to-dismiss or the Android back
+  // button used to skip the save entirely — only the chevron button's
+  // onPress flushed a pending autosave. `beforeRemove` fires for every
+  // dismissal path (button, swipe, hardware back), so this is now the one
+  // place that guarantees a pending edit is saved before the screen goes
+  // away, regardless of how the user leaves.
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', () => {
+      flushPendingSave();
+    });
+    return unsubscribe;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigation]);
+
+  // Safety net: flush on unmount too, in case the screen is ever torn down
+  // through a path beforeRemove doesn't cover.
+  useEffect(() => {
+    return () => {
+      flushPendingSave();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleTitleChange = (text: string) => {
     setTitle(text);
-    scheduleAutosave({ title: text });
+    scheduleAutosave();
   };
 
   const handleTranscriptionChange = (text: string) => {
     setTranscription(text);
-    scheduleAutosave({ transcription: text });
+    scheduleAutosave();
   };
 
   const handleTogglePin = () => {
@@ -165,14 +210,6 @@ export default function NoteDetailScreen() {
     ]);
   };
 
-  const handleClose = () => {
-    if (autosaveTimer.current) {
-      clearTimeout(autosaveTimer.current);
-      persist({ title, transcription });
-    }
-    router.back();
-  };
-
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -199,7 +236,7 @@ export default function NoteDetailScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.topBar}>
-        <TouchableOpacity onPress={handleClose} hitSlop={8}>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={8}>
           <Ionicons name="chevron-down" size={26} color={colors.text} />
         </TouchableOpacity>
         <TouchableOpacity onPress={handleTogglePin} hitSlop={8}>
