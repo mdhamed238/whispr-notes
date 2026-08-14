@@ -6,7 +6,7 @@
 
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
-import { AUDIO_CONFIG, ERROR_MESSAGES } from '@/constants/config';
+import { AUDIO_CONFIG, ERROR_MESSAGES, UI_CONFIG } from '@/constants/config';
 import { FontSize, Spacing } from '@/constants/Spacing';
 import storageService from '@/services/storageService';
 import { computeDurationSeconds, encodeWavBase64 } from '@/services/wavEncoder';
@@ -79,6 +79,27 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
     duration: 0,
   });
   const [isSaving, setIsSaving] = useState(false);
+  // Bug fix: handleStopStreaming is async (it encodes + writes the WAV to
+  // disk) but nothing used to disable Save while that was in flight. The
+  // render condition that shows Save only checked `!model.isGenerating`,
+  // which flips true the instant streamStop() runs, well before the WAV
+  // finishes writing — tapping Save in that window silently produced a
+  // text-only note even though a real recording was made.
+  const [isCapturingAudio, setIsCapturingAudio] = useState(false);
+
+  // Safety cap: samplesRef accumulates every sample with no limit and the
+  // WAV encode on stop is fully synchronous, so an unbounded recording
+  // risks a long UI freeze. This timer force-stops recording once the cap
+  // is hit.
+  const maxDurationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (maxDurationTimer.current) {
+        clearTimeout(maxDurationTimer.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     AudioManager.setAudioSessionOptions({
@@ -113,6 +134,20 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
 
       samplesRef.current = [];
       recorder.start();
+      // Bug fix: this haptic used to fire after `await model.stream()`,
+      // which doesn't resolve until streaming actually stops — so the
+      // "start" haptic was actually firing at stop time (double-buzzing
+      // alongside handleStopStreaming's own haptic), and start was silent.
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+      if (maxDurationTimer.current) {
+        clearTimeout(maxDurationTimer.current);
+      }
+      maxDurationTimer.current = setTimeout(() => {
+        maxDurationTimer.current = null;
+        handleStopStreaming();
+        Alert.alert('Recording Stopped', 'Maximum recording length reached.');
+      }, UI_CONFIG.MAX_RECORDING_DURATION_SECONDS * 1000);
 
       try {
         await model.stream();
@@ -126,8 +161,6 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
           Alert.alert('Transcription Error', 'Failed to transcribe audio. Please try again.');
         }
       }
-
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch (error) {
       console.error('Failed to start streaming:', error);
       Alert.alert('Error', ERROR_MESSAGES.RECORDING_FAILED);
@@ -135,9 +168,29 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
   };
 
   const handleStopStreaming = async () => {
+    // Bug fix: gate Save on this flag (see the isCapturingAudio comment
+    // above) so a tap that lands between streamStop() and the WAV finishing
+    // its write can't save a text-only note out from under a real recording.
+    setIsCapturingAudio(true);
     try {
       recorder.stop();
       model.streamStop();
+
+      if (maxDurationTimer.current) {
+        clearTimeout(maxDurationTimer.current);
+        maxDurationTimer.current = null;
+      }
+
+      // Bug fix: a previously-captured-but-unsaved WAV from an earlier stop
+      // in this same session would otherwise be silently orphaned on disk
+      // the moment `captured` below is overwritten with the new file.
+      if (captured.audioUri) {
+        try {
+          await FileSystem.deleteAsync(captured.audioUri, { idempotent: true });
+        } catch (error) {
+          console.warn('Failed to delete previous captured audio:', error);
+        }
+      }
 
       // Bug fix: audioUri/duration used to be hardcoded ('streaming_recording'
       // and 0) on every save. Now they come from a real WAV file encoded from
@@ -165,6 +218,8 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } catch (error) {
       console.error('Failed to stop streaming:', error);
+    } finally {
+      setIsCapturingAudio(false);
     }
   };
 
@@ -201,9 +256,20 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
     }
   };
 
-  const handleReset = () => {
+  const handleReset = async () => {
     if (model.isGenerating) {
-      handleStopStreaming();
+      await handleStopStreaming();
+    }
+    // Bug fix: Reset used to discard `captured` (and the whole session, via
+    // remount) without deleting the WAV file already written to disk at
+    // captured.audioUri, orphaning it — only a saved note's audio should
+    // survive past this point.
+    if (captured.audioUri) {
+      try {
+        await FileSystem.deleteAsync(captured.audioUri, { idempotent: true });
+      } catch (error) {
+        console.warn('Failed to delete captured audio on reset:', error);
+      }
     }
     onSessionReset();
   };
@@ -244,7 +310,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
                 <Ionicons
                   name={model.isGenerating ? 'stop' : 'mic'}
                   size={56}
-                  color={model.isGenerating ? '#ffffff' : colors.danger}
+                  color={model.isGenerating ? colors.onAccent : colors.danger}
                 />
               </TouchableOpacity>
               <Text style={styles.recordButtonText}>
@@ -274,12 +340,22 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
 
               {(model.committedTranscription || model.nonCommittedTranscription) && !model.isGenerating && (
                 <View style={styles.actionButtons}>
-                  <TouchableOpacity style={styles.saveButton} onPress={handleSaveTranscription} disabled={isSaving}>
-                    <Ionicons name="save" size={20} color="#ffffff" />
-                    <Text style={styles.saveButtonText}>{isSaving ? 'Saving…' : 'Save'}</Text>
+                  <TouchableOpacity
+                    style={styles.saveButton}
+                    onPress={handleSaveTranscription}
+                    disabled={isSaving || isCapturingAudio}
+                  >
+                    <Ionicons name="save" size={20} color={colors.onAccent} />
+                    <Text style={styles.saveButtonText}>
+                      {isSaving ? 'Saving…' : isCapturingAudio ? 'Processing audio…' : 'Save'}
+                    </Text>
                   </TouchableOpacity>
 
-                  <TouchableOpacity style={styles.resetButton} onPress={handleReset} disabled={isSaving}>
+                  <TouchableOpacity
+                    style={styles.resetButton}
+                    onPress={handleReset}
+                    disabled={isSaving || isCapturingAudio}
+                  >
                     <Ionicons name="refresh" size={20} color={colors.textMuted} />
                     <Text style={styles.resetButtonText}>Reset</Text>
                   </TouchableOpacity>
@@ -349,7 +425,7 @@ function createStyles(colors: typeof Colors.light) {
       flex: 1,
       marginRight: Spacing.sm,
     },
-    saveButtonText: { color: '#ffffff', fontSize: FontSize.md, fontWeight: '600', marginLeft: Spacing.sm },
+    saveButtonText: { color: colors.onAccent, fontSize: FontSize.md, fontWeight: '600', marginLeft: Spacing.sm },
     resetButton: {
       flexDirection: 'row',
       alignItems: 'center',

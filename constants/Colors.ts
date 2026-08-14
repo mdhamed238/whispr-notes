@@ -14,6 +14,9 @@ export default {
     tabIconSelected: tintColorLight,
     danger: '#dc2626',
     success: '#16a34a',
+    // Text/icon color to place on top of a solid success/danger/tint
+    // background.
+    onAccent: '#ffffff',
   },
   dark: {
     text: '#f2f2f2',
@@ -27,5 +30,9 @@ export default {
     tabIconSelected: tintColorDark,
     danger: '#f87171',
     success: '#4ade80',
+    // The dark theme's success/danger are light, saturated colors — white
+    // text on top of them is nearly illegible, so use a near-black instead
+    // (matching this theme's own `background`).
+    onAccent: '#0b0b0d',
   },
 };

@@ -13,12 +13,15 @@ export const AUDIO_CONFIG: AudioConfig = {
 // Storage keys for AsyncStorage
 export const STORAGE_KEYS = {
   TRANSCRIPTIONS: 'transcriptions',
-  LAST_CLEANUP: 'last_cleanup',
 } as const;
 
 // Notes list limits
 export const UI_CONFIG = {
   MAX_HISTORY_ITEMS: 1000,
+  // Safety cap: the WAV encode on stop is fully synchronous, so an
+  // unbounded recording risks a long UI freeze (or worse) for very long
+  // sessions. Recording auto-stops once this is hit.
+  MAX_RECORDING_DURATION_SECONDS: 300,
 } as const;
 
 // User-facing error messages for failure paths that are actually wired up

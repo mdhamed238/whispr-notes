@@ -8,7 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { EXPORT_FORMATS, STORAGE_KEYS, UI_CONFIG } from '../constants/config';
-import { ExportOptions, Note, StorageInfo, StorageServiceInterface } from '../types';
+import { ExportOptions, Note, StorageServiceInterface } from '../types';
 
 function formatSrtTimestamp(totalSeconds: number): string {
   const wholeSeconds = Math.max(0, Math.floor(totalSeconds));
@@ -62,7 +62,11 @@ class StorageService implements StorageServiceInterface {
    * (no title/tags/pinned/updatedAt, fake 'streaming_recording' audioUri).
    */
   private normalizeNote(item: any): Note {
-    const createdAt = new Date(item.createdAt);
+    const parsedCreatedAt = new Date(item.createdAt);
+    // Bug fix: a missing/malformed createdAt in legacy data produced an
+    // Invalid Date here, which then serialized to `null` on the next write,
+    // silently corrupting the note's date going forward.
+    const createdAt = Number.isNaN(parsedCreatedAt.getTime()) ? new Date() : parsedCreatedAt;
     return {
       id: item.id,
       title: item.title ?? (item.transcription ? String(item.transcription).slice(0, 40) : 'Untitled note'),
@@ -88,6 +92,7 @@ class StorageService implements StorageServiceInterface {
       notes[index] = {
         ...notes[index],
         ...updates,
+        id: notes[index].id,
         createdAt: notes[index].createdAt,
         updatedAt: new Date(),
       };
@@ -183,77 +188,6 @@ class StorageService implements StorageServiceInterface {
     }
   }
 
-  async getStorageInfo(): Promise<StorageInfo> {
-    try {
-      const notes = await this.getNotes();
-      let usedSpace = 0;
-
-      for (const note of notes) {
-        if (note.audioUri) {
-          try {
-            const fileInfo = await FileSystem.getInfoAsync(note.audioUri);
-            if (fileInfo.exists && 'size' in fileInfo && fileInfo.size) {
-              usedSpace += fileInfo.size;
-            }
-          } catch (error) {
-            console.warn('Failed to get file size for:', note.audioUri);
-          }
-        }
-      }
-
-      const documentDirInfo = await FileSystem.getInfoAsync(FileSystem.documentDirectory!);
-      const availableSpace = ('size' in documentDirInfo ? documentDirInfo.size : 0) || 0;
-
-      return {
-        totalTranscriptions: notes.length,
-        usedSpace,
-        availableSpace: availableSpace - usedSpace,
-        lastCleanup: await this.getLastCleanupDate(),
-      };
-    } catch (error) {
-      console.error('Failed to get storage info:', error);
-      return {
-        totalTranscriptions: 0,
-        usedSpace: 0,
-        availableSpace: 0,
-      };
-    }
-  }
-
-  async clearAllData(): Promise<void> {
-    try {
-      const notes = await this.getNotes();
-
-      for (const note of notes) {
-        if (note.audioUri) {
-          try {
-            const fileInfo = await FileSystem.getInfoAsync(note.audioUri);
-            if (fileInfo.exists) {
-              await FileSystem.deleteAsync(note.audioUri);
-            }
-          } catch (error) {
-            console.warn('Failed to delete audio file:', error);
-          }
-        }
-      }
-
-      await AsyncStorage.removeItem(STORAGE_KEYS.TRANSCRIPTIONS);
-
-      const exportDir = `${FileSystem.documentDirectory}exports/`;
-      const dirInfo = await FileSystem.getInfoAsync(exportDir);
-      if (dirInfo.exists) {
-        await FileSystem.deleteAsync(exportDir);
-      }
-
-      // Bug fix: this used to write into STORAGE_KEYS.TRANSCRIPTIONS (a plain
-      // object where the reader expects an array), corrupting the notes list.
-      await AsyncStorage.setItem(STORAGE_KEYS.LAST_CLEANUP, new Date().toISOString());
-    } catch (error) {
-      console.error('Failed to clear all data:', error);
-      throw new Error('Failed to clear all data');
-    }
-  }
-
   private generateTextExport(note: Note, options: ExportOptions): string {
     let content = note.transcription;
 
@@ -296,15 +230,6 @@ class StorageService implements StorageServiceInterface {
     const startTime = '00:00:00,000';
     const endTime = formatSrtTimestamp(note.duration);
     return `1\n${startTime} --> ${endTime}\n${note.transcription}\n\n`;
-  }
-
-  private async getLastCleanupDate(): Promise<Date | undefined> {
-    try {
-      const data = await AsyncStorage.getItem(STORAGE_KEYS.LAST_CLEANUP);
-      return data ? new Date(data) : undefined;
-    } catch (error) {
-      return undefined;
-    }
   }
 }
 

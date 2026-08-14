@@ -81,14 +81,6 @@ export default function NoteDetailScreen() {
     };
   }, [id]);
 
-  useEffect(() => {
-    return () => {
-      if (autosaveTimer.current) {
-        clearTimeout(autosaveTimer.current);
-      }
-    };
-  }, []);
-
   const persist = (updates: Partial<Note>) => {
     if (!id) return;
     storageService.updateNote(id, updates).catch((error) => {
@@ -179,6 +171,12 @@ export default function NoteDetailScreen() {
         style: 'destructive',
         onPress: async () => {
           try {
+            // Cancel any pending autosave so it doesn't try to flush a
+            // write against a note that's about to be (or just was) deleted.
+            if (autosaveTimer.current) {
+              clearTimeout(autosaveTimer.current);
+              autosaveTimer.current = null;
+            }
             if (id) await storageService.deleteNote(id);
             router.back();
           } catch (error) {
@@ -285,7 +283,7 @@ export default function NoteDetailScreen() {
               autoCorrect={false}
             />
             <TouchableOpacity onPress={handleAddTag} style={styles.addTagButton}>
-              <Ionicons name="add" size={18} color="#ffffff" />
+              <Ionicons name="add" size={18} color={colors.onAccent} />
             </TouchableOpacity>
           </View>
         </View>
@@ -317,6 +315,14 @@ function NotePlayer({ uri, colors }: { uri: string; colors: typeof Colors.light 
   const player = useAudioPlayer(uri);
   const status = useAudioPlayerStatus(player);
   const styles = createStyles(colors);
+
+  // Bug fix: without this, pressing play again after a note finishes
+  // appeared to do nothing — the player was left parked at the end.
+  useEffect(() => {
+    if (status.didJustFinish) {
+      player.seekTo(0);
+    }
+  }, [status.didJustFinish, player]);
 
   return (
     <View style={styles.playerRow}>

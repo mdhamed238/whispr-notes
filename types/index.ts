@@ -24,13 +24,6 @@ export interface ExportOptions {
   includeMetadata: boolean;
 }
 
-export interface StorageInfo {
-  totalTranscriptions: number;
-  usedSpace: number; // bytes
-  availableSpace: number; // bytes
-  lastCleanup?: Date;
-}
-
 export interface StorageServiceInterface {
   saveNote(note: Note): Promise<void>;
   getNotes(): Promise<Note[]>;
@@ -38,6 +31,4 @@ export interface StorageServiceInterface {
   deleteNote(id: string): Promise<void>;
   exportNote(id: string, options: ExportOptions): Promise<string>;
   shareExportedFile(fileUri: string): Promise<void>;
-  getStorageInfo(): Promise<StorageInfo>;
-  clearAllData(): Promise<void>;
 }
