@@ -6,7 +6,7 @@
 
 **Architecture:** In-place extension of the existing two-screen Expo Router app — no new dependencies, no database. `AsyncStorage`-as-JSON-array remains the store; the `TranscriptionItem` shape becomes `Note` (title, tags, pinned, real audioUri/duration). A third screen (`app/note/[id].tsx`) is added as a modal for viewing/editing a single note.
 
-**Tech Stack:** Expo SDK 54, React Native 0.81, expo-router, `react-native-audio-api` (recording, now with `enableFileOutput`), `react-native-executorch` (Whisper Tiny EN streaming STT, unchanged), `expo-audio` (new: playback), AsyncStorage.
+**Tech Stack:** Expo SDK 54, React Native 0.81, expo-router, `react-native-audio-api` (recording — the installed 0.9.1 has no file-output API, so we hand-roll a WAV encoder from the same PCM buffers already used for streaming, see `services/wavEncoder.ts`), `react-native-executorch` (Whisper Tiny EN streaming STT, unchanged), `expo-audio` (new: playback), AsyncStorage.
 
 **Spec:** `docs/superpowers/specs/2026-08-14-notes-app-transformation-design.md`
 
@@ -14,7 +14,7 @@
 
 - No new external dependencies. `expo-audio` is already installed and becomes used (playback); `expo-av` is already installed and unused — it gets removed.
 - No database/SQLite. No fixed `category` enum — freeform `tags: string[]` only. No test framework added.
-- `AudioRecorder.enableFileOutput({ format: FileFormat.M4A, preset: FilePreset.High })` (called once, before `start()`) records a real audio file in parallel with the streamed buffers. `recorder.stop()` resolves to `{ status: 'success', paths, duration, size } | { status: 'error', message }`. `recorder.start()` resolves to `{ status: 'error', message } | ...`. `AudioManager.requestRecordingPermissions()` resolves to the string `'Granted'` on success, something else on denial. All four of these return values are currently ignored in the live code — every task that touches `index.tsx` must check them.
+- **Corrected during Task 7 (originally researched against a newer library version than what's installed — see the ledger for the full ruling):** the installed `react-native-audio-api` is 0.9.1, whose `AudioRecorder` has no `enableFileOutput`/`FileFormat`/`FilePreset` API at all, and `start(): void` / `stop(): void` are synchronous with no return value — confirmed directly from `node_modules/react-native-audio-api/lib/typescript/core/AudioRecorder.d.ts`. There is no way to get a recorded file or a result status from the recorder itself in this version. Instead: `onAudioReady`'s callback (unchanged, still the single-callback form already in use) already hands us the raw Float32 PCM buffers being fed to the model — Task 7 also accumulates those same samples in a ref, and on stop encodes them into a real 16-bit PCM WAV file via a new small helper, `services/wavEncoder.ts` (`encodeWavBase64(samples, sampleRate)`, `computeDurationSeconds(sampleCount, sampleRate)`), written to disk with `expo-file-system`'s `writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 })`. Duration comes from `sampleCount / sampleRate`, not from any recorder result. `AudioManager.requestRecordingPermissions(): Promise<PermissionStatus>` (`'Granted' | 'Denied' | 'Undetermined'`) is confirmed correct and unchanged from the original research — this one still needs to be checked (it was previously ignored in the live code).
 - `expo-audio`: `useAudioPlayer(uri)` returns a player; `useAudioPlayerStatus(player)` returns `{ playing, currentTime, duration, ... }`. Both come from `import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio'`.
 - **No Jest/RNTL is configured in this repo, and none is added.** Every task's verification step is `npx tsc --noEmit` (must report no errors touching the files that task changed) plus, for deletion tasks, a `grep` sweep confirming zero remaining references. The final task adds a manual on-device smoke-test checklist — this plan cannot be executed end-to-end in a sandboxed environment (no physical device, no simulator support per the README).
 - `node_modules/` is not present in this environment. Before Task 1's verification step can run, install dependencies once: `npm install` from the repo root.
@@ -759,16 +759,98 @@ git commit -m "feat: expand theme tokens (Colors.ts) and add a shared Spacing/Fo
 
 ### Task 7: Rewrite the Record screen — real audio capture, fixed bugs, theming
 
-Fixes: permission/start/stop results ignored, fake `audioUri`/`duration: 0`, Reset not clearing the transcript, hardcoded light-only colors. Adds: real audio file capture via `enableFileOutput`, auto-titled save, navigation to Notes on save.
+Fixes: permission ignored, fake `audioUri`/`duration: 0`, Reset not clearing the transcript, hardcoded light-only colors. Adds: real audio file capture (hand-rolled WAV encoding — see the Global Constraints note on why `enableFileOutput` isn't used), auto-titled save, navigation to Notes on save.
 
 **Files:**
+- Create: `services/wavEncoder.ts`
 - Modify: `app/(tabs)/index.tsx` (full rewrite)
 
 **Interfaces:**
 - Consumes: `AUDIO_CONFIG`, `ERROR_MESSAGES` (Task 4); `Colors` (Task 6); `Spacing`, `FontSize` (Task 6); `storageService.saveNote` (Task 5); `Note` (Task 3)
-- Produces: nothing consumed by other tasks (leaf screen)
+- Produces: `encodeWavBase64(samples: number[], sampleRate: number): string`, `computeDurationSeconds(sampleCount: number, sampleRate: number): number` from `services/wavEncoder.ts` — consumed only within this task's own `index.tsx`, but written as a standalone, dependency-free module (no React, no app imports) so it's easy to reason about in isolation.
 
-- [ ] **Step 1: Replace the full contents of `app/(tabs)/index.tsx`**
+- [ ] **Step 1: Create `services/wavEncoder.ts`**
+
+```ts
+/**
+ * Minimal WAV (16-bit PCM mono) encoder.
+ *
+ * The installed react-native-audio-api version (0.9.1) has no built-in
+ * "record to file" support — AudioRecorder.start()/stop() are synchronous
+ * void, and there's no enableFileOutput/FileFormat/FilePreset API (that
+ * exists only in newer versions of the library, not the one this project
+ * has pinned). We already receive raw Float32 PCM buffers via
+ * onAudioReady for streaming transcription, so this module turns those
+ * same accumulated samples into a real, playable WAV file.
+ */
+
+function floatTo16BitPCM(samples: number[]): Uint8Array {
+  const bytes = new Uint8Array(samples.length * 2);
+  const view = new DataView(bytes.buffer);
+  for (let i = 0; i < samples.length; i++) {
+    const clamped = Math.max(-1, Math.min(1, samples[i]));
+    const value = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+    view.setInt16(i * 2, value, true);
+  }
+  return bytes;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let result = '';
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b0 = bytes[i];
+    const b1 = i + 1 < bytes.length ? bytes[i + 1] : 0;
+    const b2 = i + 2 < bytes.length ? bytes[i + 2] : 0;
+    result += CHARS[b0 >> 2];
+    result += CHARS[((b0 & 0x03) << 4) | (b1 >> 4)];
+    result += i + 1 < bytes.length ? CHARS[((b1 & 0x0f) << 2) | (b2 >> 6)] : '=';
+    result += i + 2 < bytes.length ? CHARS[b2 & 0x3f] : '=';
+  }
+  return result;
+}
+
+function buildWavHeader(dataLength: number, sampleRate: number): Uint8Array {
+  const header = new Uint8Array(44);
+  const view = new DataView(header.buffer);
+  const writeString = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i++) {
+      view.setUint8(offset + i, text.charCodeAt(i));
+    }
+  };
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + dataLength, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true); // PCM chunk size
+  view.setUint16(20, 1, true); // audio format: PCM
+  view.setUint16(22, 1, true); // channels: mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true); // byte rate (16-bit mono)
+  view.setUint16(32, 2, true); // block align
+  view.setUint16(34, 16, true); // bits per sample
+  writeString(36, 'data');
+  view.setUint32(40, dataLength, true);
+
+  return header;
+}
+
+export function encodeWavBase64(samples: number[], sampleRate: number): string {
+  const pcmBytes = floatTo16BitPCM(samples);
+  const header = buildWavHeader(pcmBytes.length, sampleRate);
+  const wavBytes = new Uint8Array(header.length + pcmBytes.length);
+  wavBytes.set(header, 0);
+  wavBytes.set(pcmBytes, header.length);
+  return bytesToBase64(wavBytes);
+}
+
+export function computeDurationSeconds(sampleCount: number, sampleRate: number): number {
+  return sampleRate > 0 ? sampleCount / sampleRate : 0;
+}
+```
+
+- [ ] **Step 2: Replace the full contents of `app/(tabs)/index.tsx`**
 
 ```tsx
 /**
@@ -782,11 +864,13 @@ import Colors from '@/constants/Colors';
 import { AUDIO_CONFIG, ERROR_MESSAGES } from '@/constants/config';
 import { FontSize, Spacing } from '@/constants/Spacing';
 import storageService from '@/services/storageService';
+import { computeDurationSeconds, encodeWavBase64 } from '@/services/wavEncoder';
 import { Note } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   ScrollView,
@@ -796,12 +880,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {
-  AudioManager,
-  AudioRecorder,
-  FileFormat,
-  FilePreset,
-} from 'react-native-audio-api';
+import { AudioManager, AudioRecorder } from 'react-native-audio-api';
 import { useSpeechToText, WHISPER_TINY_EN } from 'react-native-executorch';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -835,16 +914,20 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
   const styles = createStyles(colors);
   const router = useRouter();
 
-  const [recorder] = useState(() => {
-    const instance = new AudioRecorder({
-      sampleRate: AUDIO_CONFIG.sampleRate,
-      bufferLengthInSamples: AUDIO_CONFIG.sampleRate * 0.1,
-    });
-    instance.enableFileOutput({ format: FileFormat.M4A, preset: FilePreset.High });
-    return instance;
-  });
+  const [recorder] = useState(
+    () =>
+      new AudioRecorder({
+        sampleRate: AUDIO_CONFIG.sampleRate,
+        bufferLengthInSamples: AUDIO_CONFIG.sampleRate * 0.1,
+      })
+  );
 
   const model = useSpeechToText({ model: WHISPER_TINY_EN });
+
+  // The installed react-native-audio-api has no file-output API, so we
+  // accumulate the same raw PCM samples already streamed into the model
+  // and encode them into a real WAV file ourselves on stop.
+  const samplesRef = useRef<number[]>([]);
 
   const [captured, setCaptured] = useState<{ audioUri: string | null; duration: number }>({
     audioUri: null,
@@ -862,6 +945,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
     recorder.onAudioReady(async ({ buffer }) => {
       try {
         const bufferArray = Array.from(buffer.getChannelData(0));
+        samplesRef.current.push(...bufferArray);
         model.streamInsert(bufferArray);
       } catch (error) {
         console.error('Audio buffer processing error:', error);
@@ -882,12 +966,8 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
         return;
       }
 
-      // Bug fix: this result was previously ignored too.
-      const startResult = await recorder.start();
-      if (startResult.status === 'error') {
-        Alert.alert('Recording Error', ERROR_MESSAGES.RECORDING_FAILED);
-        return;
-      }
+      samplesRef.current = [];
+      recorder.start();
 
       try {
         await model.stream();
@@ -911,14 +991,28 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
 
   const handleStopStreaming = async () => {
     try {
-      const stopResult = await recorder.stop();
+      recorder.stop();
       model.streamStop();
 
       // Bug fix: audioUri/duration used to be hardcoded ('streaming_recording'
-      // and 0) on every save. Now they come from the real file the recorder
-      // just wrote.
-      if (stopResult.status === 'success') {
-        setCaptured({ audioUri: stopResult.paths[0] ?? null, duration: stopResult.duration });
+      // and 0) on every save. Now they come from a real WAV file encoded from
+      // the same PCM samples fed to the model (see services/wavEncoder.ts).
+      const sampleCount = samplesRef.current.length;
+      if (sampleCount > 0) {
+        const wavBase64 = encodeWavBase64(samplesRef.current, AUDIO_CONFIG.sampleRate);
+        const audioDir = `${FileSystem.documentDirectory}audio/`;
+        const dirInfo = await FileSystem.getInfoAsync(audioDir);
+        if (!dirInfo.exists) {
+          await FileSystem.makeDirectoryAsync(audioDir, { intermediates: true });
+        }
+        const fileUri = `${audioDir}note-${Date.now()}.wav`;
+        await FileSystem.writeAsStringAsync(fileUri, wavBase64, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        setCaptured({
+          audioUri: fileUri,
+          duration: computeDurationSeconds(sampleCount, AUDIO_CONFIG.sampleRate),
+        });
       } else {
         setCaptured({ audioUri: null, duration: 0 });
       }
@@ -1129,19 +1223,19 @@ function createStyles(colors: typeof Colors.light) {
 }
 ```
 
-- [ ] **Step 2: Verify**
+- [ ] **Step 3: Verify**
 
 ```bash
 npx tsc --noEmit
 ```
 
-Expected: remaining errors confined to `app/(tabs)/two.tsx` (fixed in Task 8), **plus** a typed-route error on this file's own `router.push('/notes')` call — Expo Router's generated route types (`.expo/types/router.d.ts`) don't yet include `/notes` at this point, since Task 8 is what creates `app/(tabs)/notes.tsx`. Both are expected and resolve once Task 8 lands; if the `/notes` error is the *only* thing tsc reports for this file, that's correct, not a regression to chase down here.
+Expected: remaining errors confined to `app/(tabs)/two.tsx` (fixed in Task 8), **plus** a typed-route error on this file's own `router.push('/notes')` call — Expo Router's generated route types (`.expo/types/router.d.ts`) don't yet include `/notes` at this point, since Task 8 is what creates `app/(tabs)/notes.tsx`. Both are expected and resolve once Task 8 lands; if the `/notes` error is the *only* thing tsc reports for this file, that's correct, not a regression to chase down here. `services/wavEncoder.ts` and the rest of `index.tsx` (everything but that one line) must be fully clean — no errors related to `AudioRecorder`, `AUDIO_CONFIG`, `FileSystem`, or the new encoder functions.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add "app/(tabs)/index.tsx"
-git commit -m "fix: real audio capture + duration on Record screen, permission/start/stop error handling, working Reset, theming"
+git add "app/(tabs)/index.tsx" services/wavEncoder.ts
+git commit -m "fix: real audio capture + duration on Record screen via hand-rolled WAV encoding, permission handling, working Reset, theming"
 ```
 
 ---
@@ -1939,7 +2033,7 @@ types/
 Update the **How It Works** section, step 4-5:
 
 ```markdown
-4. On stop, the recorder also finishes writing an M4A file (captured in parallel via `enableFileOutput`) — the note is saved with the real audio duration and a link to that file.
+4. On stop, the same audio samples fed to the model are also encoded into a real WAV file on-device — the note is saved with the real audio duration and a link to that file.
 5. The Notes tab lists saved notes; tap one to edit its title/transcript/tags, play back the audio, export, or delete it.
 ```
 
@@ -1979,3 +2073,4 @@ This cannot be run in this environment (no physical device, no simulator support
 - **Spec coverage:** every section of the spec maps to a task — dead code removal (1–2), type/constant trimming (3–4), storage bug fixes (5), theming (6), Record screen bugs/audio capture (7), Notes screen + focus-refresh bug (8), Note Detail/playback (9), README + backward-compat verification (10, plus the `normalizeNote` defaulting logic embedded in Task 5).
 - **Placeholder scan:** no TBD/TODO; every step has literal, complete code or an exact command.
 - **Type consistency:** `Note`, `ExportOptions`, `StorageInfo`, `StorageServiceInterface` (Task 3) match the method names used in `storageService` (Task 5) and called from Tasks 7–9 (`saveNote`, `getNotes`, `updateNote`, `deleteNote`, `exportNote`, `shareExportedFile`, `getStorageInfo`, `clearAllData`). `Colors`/`Spacing`/`FontSize` (Task 6) are consumed with the same key names in Tasks 7–9. The one deliberate deviation from the original UI discussion (swipe-to-delete → "•••" action sheet) is called out explicitly in Task 8 with its rationale (no new dependency).
+- **Post-writing correction (discovered during Task 7 execution, not caught by the pre-execution self-review):** the original Task 7 code assumed `react-native-audio-api`'s `AudioRecorder.enableFileOutput()`/`FileFormat`/`FilePreset` API and an async `start()`/`stop()` returning `{status, paths, duration}` — all researched against a newer library version (0.11.0, via context7 docs) than the one actually pinned and installed (0.9.1). Confirmed directly against `node_modules/react-native-audio-api/lib/typescript/core/AudioRecorder.d.ts`: none of that exists in 0.9.1; `start()`/`stop()` are synchronous `void`. Task 7 (and the Global Constraints section, and Task 10's README text) were corrected in place to hand-roll a WAV encoder (new `services/wavEncoder.ts`) from the same PCM buffers already flowing through `onAudioReady` for streaming transcription, computing duration from sample count instead of a recorder result. `AudioManager.requestRecordingPermissions()` was independently verified against the same installed type defs and is unaffected — that part of the original design was correct. See the SDD ledger for the full ruling.
