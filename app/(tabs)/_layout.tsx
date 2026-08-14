@@ -34,11 +34,11 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="two"
+        name="notes"
         options={{
-          title: 'History',
-          tabBarIcon: ({ color }) => <TabBarIcon name="list" color={color} />,
-          headerTitle: 'Transcription History',
+          title: 'Notes',
+          tabBarIcon: ({ color }) => <TabBarIcon name="document-text" color={color} />,
+          headerTitle: 'Notes',
         }}
       />
     </Tabs>
