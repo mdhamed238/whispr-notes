@@ -1,248 +1,211 @@
 /**
  * Storage Service
- * Handles local storage of transcriptions using AsyncStorage
- * Provides CRUD operations and export functionality
+ * Handles local storage of notes using AsyncStorage.
+ * Provides CRUD operations and export functionality.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import { EXPORT_FORMATS } from '../constants/config';
-import {
-  ExportOptions,
-  STORAGE_KEYS,
-  StorageInfo,
-  StorageServiceInterface,
-  TranscriptionItem
-} from '../types';
+import { EXPORT_FORMATS, STORAGE_KEYS, UI_CONFIG } from '../constants/config';
+import { ExportOptions, Note, StorageInfo, StorageServiceInterface } from '../types';
+
+function formatSrtTimestamp(totalSeconds: number): string {
+  const wholeSeconds = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(wholeSeconds / 3600);
+  const minutes = Math.floor((wholeSeconds % 3600) / 60);
+  const seconds = wholeSeconds % 60;
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)},000`;
+}
 
 class StorageService implements StorageServiceInterface {
-  /**
-   * Save a new transcription to storage
-   * @param item - Transcription item to save
-   */
-  async saveTranscription(item: TranscriptionItem): Promise<void> {
+  async saveNote(note: Note): Promise<void> {
     try {
-      const existingTranscriptions = await this.getTranscriptions();
-      
-      // Add the new transcription to the beginning of the array
-      const updatedTranscriptions = [item, ...existingTranscriptions];
-      
-      // Limit to maximum number of items to prevent storage bloat
-      const MAX_ITEMS = 1000;
-      if (updatedTranscriptions.length > MAX_ITEMS) {
-        updatedTranscriptions.splice(MAX_ITEMS);
+      const existingNotes = await this.getNotes();
+      const updatedNotes = [note, ...existingNotes];
+
+      if (updatedNotes.length > UI_CONFIG.MAX_HISTORY_ITEMS) {
+        updatedNotes.splice(UI_CONFIG.MAX_HISTORY_ITEMS);
       }
-      
-      await AsyncStorage.setItem(
-        STORAGE_KEYS.TRANSCRIPTIONS,
-        JSON.stringify(updatedTranscriptions)
-      );
-      
-      console.log('Transcription saved successfully:', item.id);
+
+      await AsyncStorage.setItem(STORAGE_KEYS.TRANSCRIPTIONS, JSON.stringify(updatedNotes));
     } catch (error) {
-      console.error('Failed to save transcription:', error);
-      throw new Error('Failed to save transcription');
+      console.error('Failed to save note:', error);
+      throw new Error('Failed to save note');
     }
   }
 
-  /**
-   * Get all transcriptions from storage
-   * @returns Promise<TranscriptionItem[]> - Array of transcription items
-   */
-  async getTranscriptions(): Promise<TranscriptionItem[]> {
+  async getNotes(): Promise<Note[]> {
     try {
       const data = await AsyncStorage.getItem(STORAGE_KEYS.TRANSCRIPTIONS);
-      
+
       if (!data) {
         return [];
       }
-      
-      const transcriptions = JSON.parse(data);
-      
-      // Convert createdAt strings back to Date objects
-      return transcriptions.map((item: any) => ({
-        ...item,
-        createdAt: new Date(item.createdAt),
-      }));
+
+      const rawNotes = JSON.parse(data);
+
+      if (!Array.isArray(rawNotes)) {
+        return [];
+      }
+
+      return rawNotes.map((item: any) => this.normalizeNote(item));
     } catch (error) {
-      console.error('Failed to get transcriptions:', error);
+      console.error('Failed to get notes:', error);
       return [];
     }
   }
 
   /**
-   * Update an existing transcription
-   * @param id - ID of the transcription to update
-   * @param updates - Partial transcription data to update
+   * Fills in defaults for notes saved under the old TranscriptionItem shape
+   * (no title/tags/pinned/updatedAt, fake 'streaming_recording' audioUri).
    */
-  async updateTranscription(id: string, updates: Partial<TranscriptionItem>): Promise<void> {
+  private normalizeNote(item: any): Note {
+    const createdAt = new Date(item.createdAt);
+    return {
+      id: item.id,
+      title: item.title ?? (item.transcription ? String(item.transcription).slice(0, 40) : 'Untitled note'),
+      transcription: item.transcription ?? '',
+      audioUri: item.audioUri && item.audioUri !== 'streaming_recording' ? item.audioUri : null,
+      duration: item.duration ?? 0,
+      tags: Array.isArray(item.tags) ? item.tags : [],
+      pinned: item.pinned ?? false,
+      createdAt,
+      updatedAt: item.updatedAt ? new Date(item.updatedAt) : createdAt,
+    };
+  }
+
+  async updateNote(id: string, updates: Partial<Note>): Promise<void> {
     try {
-      const transcriptions = await this.getTranscriptions();
-      const index = transcriptions.findIndex(item => item.id === id);
-      
+      const notes = await this.getNotes();
+      const index = notes.findIndex((note) => note.id === id);
+
       if (index === -1) {
-        throw new Error('Transcription not found');
+        throw new Error('Note not found');
       }
-      
-      // Update the transcription
-      transcriptions[index] = {
-        ...transcriptions[index],
+
+      notes[index] = {
+        ...notes[index],
         ...updates,
-        // Preserve the original createdAt if not being updated
-        createdAt: updates.createdAt || transcriptions[index].createdAt,
+        createdAt: notes[index].createdAt,
+        updatedAt: new Date(),
       };
-      
-      await AsyncStorage.setItem(
-        STORAGE_KEYS.TRANSCRIPTIONS,
-        JSON.stringify(transcriptions)
-      );
-      
-      console.log('Transcription updated successfully:', id);
+
+      await AsyncStorage.setItem(STORAGE_KEYS.TRANSCRIPTIONS, JSON.stringify(notes));
     } catch (error) {
-      console.error('Failed to update transcription:', error);
-      throw new Error('Failed to update transcription');
+      console.error('Failed to update note:', error);
+      throw new Error('Failed to update note');
     }
   }
 
-  /**
-   * Delete a transcription
-   * @param id - ID of the transcription to delete
-   */
-  async deleteTranscription(id: string): Promise<void> {
+  async deleteNote(id: string): Promise<void> {
     try {
-      const transcriptions = await this.getTranscriptions();
-      const filteredTranscriptions = transcriptions.filter(item => item.id !== id);
-      
-      if (filteredTranscriptions.length === transcriptions.length) {
-        throw new Error('Transcription not found');
+      const notes = await this.getNotes();
+      const note = notes.find((n) => n.id === id);
+      const remaining = notes.filter((n) => n.id !== id);
+
+      if (remaining.length === notes.length) {
+        throw new Error('Note not found');
       }
-      
-      await AsyncStorage.setItem(
-        STORAGE_KEYS.TRANSCRIPTIONS,
-        JSON.stringify(filteredTranscriptions)
-      );
-      
-      // Also delete the associated audio file
-      const transcription = transcriptions.find(item => item.id === id);
-      if (transcription?.audioUri) {
+
+      await AsyncStorage.setItem(STORAGE_KEYS.TRANSCRIPTIONS, JSON.stringify(remaining));
+
+      if (note?.audioUri) {
         try {
-          const fileInfo = await FileSystem.getInfoAsync(transcription.audioUri);
+          const fileInfo = await FileSystem.getInfoAsync(note.audioUri);
           if (fileInfo.exists) {
-            await FileSystem.deleteAsync(transcription.audioUri);
+            await FileSystem.deleteAsync(note.audioUri);
           }
         } catch (fileError) {
           console.warn('Failed to delete audio file:', fileError);
         }
       }
-      
-      console.log('Transcription deleted successfully:', id);
     } catch (error) {
-      console.error('Failed to delete transcription:', error);
-      throw new Error('Failed to delete transcription');
+      console.error('Failed to delete note:', error);
+      throw new Error('Failed to delete note');
     }
   }
 
-  /**
-   * Export transcription in specified format
-   * @param id - ID of the transcription to export
-   * @param options - Export options (format, metadata, timestamps)
-   * @returns Promise<string> - Path to exported file
-   */
-  async exportTranscription(id: string, options: ExportOptions): Promise<string> {
+  async exportNote(id: string, options: ExportOptions): Promise<string> {
     try {
-      const transcriptions = await this.getTranscriptions();
-      const transcription = transcriptions.find(item => item.id === id);
-      
-      if (!transcription) {
-        throw new Error('Transcription not found');
+      const notes = await this.getNotes();
+      const note = notes.find((n) => n.id === id);
+
+      if (!note) {
+        throw new Error('Note not found');
       }
-      
+
       let content = '';
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const fileName = `transcription-${timestamp}`;
-      
+      const fileName = `note-${timestamp}`;
+
       switch (options.format) {
         case EXPORT_FORMATS.TXT:
-          content = this.generateTextExport(transcription, options);
+          content = this.generateTextExport(note, options);
           break;
         case EXPORT_FORMATS.JSON:
-          content = this.generateJsonExport(transcription, options);
+          content = this.generateJsonExport(note, options);
           break;
         case EXPORT_FORMATS.SRT:
-          content = this.generateSrtExport(transcription, options);
+          content = this.generateSrtExport(note);
           break;
         default:
           throw new Error('Unsupported export format');
       }
-      
-      // Create export directory if it doesn't exist
+
       const exportDir = `${FileSystem.documentDirectory}exports/`;
       const dirInfo = await FileSystem.getInfoAsync(exportDir);
       if (!dirInfo.exists) {
         await FileSystem.makeDirectoryAsync(exportDir, { intermediates: true });
       }
-      
-      // Write file
+
       const fileUri = `${exportDir}${fileName}.${options.format}`;
       await FileSystem.writeAsStringAsync(fileUri, content);
-      
-      console.log('Transcription exported successfully:', fileUri);
+
       return fileUri;
     } catch (error) {
-      console.error('Failed to export transcription:', error);
-      throw new Error('Failed to export transcription');
+      console.error('Failed to export note:', error);
+      throw new Error('Failed to export note');
     }
   }
 
-  /**
-   * Share exported transcription file
-   * @param fileUri - URI of the file to share
-   */
   async shareExportedFile(fileUri: string): Promise<void> {
     try {
       const isAvailable = await Sharing.isAvailableAsync();
       if (!isAvailable) {
         throw new Error('Sharing is not available on this device');
       }
-      
       await Sharing.shareAsync(fileUri);
-      console.log('File shared successfully');
     } catch (error) {
       console.error('Failed to share file:', error);
       throw new Error('Failed to share file');
     }
   }
 
-  /**
-   * Get storage information
-   * @returns Promise<StorageInfo> - Storage usage information
-   */
   async getStorageInfo(): Promise<StorageInfo> {
     try {
-      const transcriptions = await this.getTranscriptions();
+      const notes = await this.getNotes();
       let usedSpace = 0;
-      
-      // Calculate used space by checking file sizes
-      for (const transcription of transcriptions) {
-        if (transcription.audioUri) {
+
+      for (const note of notes) {
+        if (note.audioUri) {
           try {
-            const fileInfo = await FileSystem.getInfoAsync(transcription.audioUri);
+            const fileInfo = await FileSystem.getInfoAsync(note.audioUri);
             if (fileInfo.exists && 'size' in fileInfo && fileInfo.size) {
               usedSpace += fileInfo.size;
             }
           } catch (error) {
-            console.warn('Failed to get file size for:', transcription.audioUri);
+            console.warn('Failed to get file size for:', note.audioUri);
           }
         }
       }
-      
-      // Get available space (this is an approximation)
+
       const documentDirInfo = await FileSystem.getInfoAsync(FileSystem.documentDirectory!);
       const availableSpace = ('size' in documentDirInfo ? documentDirInfo.size : 0) || 0;
-      
+
       return {
-        totalTranscriptions: transcriptions.length,
+        totalTranscriptions: notes.length,
         usedSpace,
         availableSpace: availableSpace - usedSpace,
         lastCleanup: await this.getLastCleanupDate(),
@@ -257,104 +220,87 @@ class StorageService implements StorageServiceInterface {
     }
   }
 
-  /**
-   * Clear all transcription data
-   */
   async clearAllData(): Promise<void> {
     try {
-      // Get all transcriptions to delete their audio files
-      const transcriptions = await this.getTranscriptions();
-      
-      // Delete audio files
-      for (const transcription of transcriptions) {
-        if (transcription.audioUri) {
+      const notes = await this.getNotes();
+
+      for (const note of notes) {
+        if (note.audioUri) {
           try {
-            const fileInfo = await FileSystem.getInfoAsync(transcription.audioUri);
+            const fileInfo = await FileSystem.getInfoAsync(note.audioUri);
             if (fileInfo.exists) {
-              await FileSystem.deleteAsync(transcription.audioUri);
+              await FileSystem.deleteAsync(note.audioUri);
             }
           } catch (error) {
             console.warn('Failed to delete audio file:', error);
           }
         }
       }
-      
-      // Clear transcriptions from storage
+
       await AsyncStorage.removeItem(STORAGE_KEYS.TRANSCRIPTIONS);
-      
-      // Clear exports directory
+
       const exportDir = `${FileSystem.documentDirectory}exports/`;
       const dirInfo = await FileSystem.getInfoAsync(exportDir);
       if (dirInfo.exists) {
         await FileSystem.deleteAsync(exportDir);
       }
-      
-      // Record cleanup date
-      await AsyncStorage.setItem(
-        STORAGE_KEYS.TRANSCRIPTIONS,
-        JSON.stringify({ lastCleanup: new Date().toISOString() })
-      );
-      
-      console.log('All data cleared successfully');
+
+      // Bug fix: this used to write into STORAGE_KEYS.TRANSCRIPTIONS (a plain
+      // object where the reader expects an array), corrupting the notes list.
+      await AsyncStorage.setItem(STORAGE_KEYS.LAST_CLEANUP, new Date().toISOString());
     } catch (error) {
       console.error('Failed to clear all data:', error);
       throw new Error('Failed to clear all data');
     }
   }
 
-  /**
-   * Generate text export content
-   */
-  private generateTextExport(transcription: TranscriptionItem, options: ExportOptions): string {
-    let content = transcription.transcription;
-    
+  private generateTextExport(note: Note, options: ExportOptions): string {
+    let content = note.transcription;
+
     if (options.includeMetadata) {
       const metadata = [
-        `Created: ${transcription.createdAt.toLocaleString()}`,
-        `Duration: ${transcription.duration}s`,
-        `Confidence: ${transcription.confidence || 'N/A'}`,
-      ].join('\n');
+        `Title: ${note.title}`,
+        `Created: ${note.createdAt.toLocaleString()}`,
+        `Duration: ${note.duration}s`,
+        note.tags.length > 0 ? `Tags: ${note.tags.join(', ')}` : null,
+      ]
+        .filter((line): line is string => Boolean(line))
+        .join('\n');
       content = `${metadata}\n\n${content}`;
     }
-    
+
     return content;
   }
 
-  /**
-   * Generate JSON export content
-   */
-  private generateJsonExport(transcription: TranscriptionItem, options: ExportOptions): string {
+  private generateJsonExport(note: Note, options: ExportOptions): string {
     const exportData: any = {
-      transcription: transcription.transcription,
-      duration: transcription.duration,
-      createdAt: transcription.createdAt.toISOString(),
+      title: note.title,
+      transcription: note.transcription,
+      duration: note.duration,
+      createdAt: note.createdAt.toISOString(),
     };
-    
+
     if (options.includeMetadata) {
-      exportData.confidence = transcription.confidence;
-      exportData.id = transcription.id;
+      exportData.id = note.id;
+      exportData.tags = note.tags;
+      exportData.pinned = note.pinned;
     }
-    
+
     return JSON.stringify(exportData, null, 2);
   }
 
-  /**
-   * Generate SRT subtitle export content
-   */
-  private generateSrtExport(transcription: TranscriptionItem, options: ExportOptions): string {
-    // Simple SRT format - in a real app, you'd want proper subtitle timing
+  private generateSrtExport(note: Note): string {
+    // Bug fix: the old version did `duration.toString().padStart(2, '0')`
+    // straight into the seconds field with no minutes/hours math, producing
+    // invalid timestamps like "00:00:125,000" for anything over 59s.
     const startTime = '00:00:00,000';
-    const endTime = `00:00:${transcription.duration.toString().padStart(2, '0')},000`;
-    
-    return `1\n${startTime} --> ${endTime}\n${transcription.transcription}\n\n`;
+    const endTime = formatSrtTimestamp(note.duration);
+    return `1\n${startTime} --> ${endTime}\n${note.transcription}\n\n`;
   }
 
-  /**
-   * Get last cleanup date from storage
-   */
   private async getLastCleanupDate(): Promise<Date | undefined> {
     try {
-      const data = await AsyncStorage.getItem('last_cleanup');
+      const data = await AsyncStorage.getItem(STORAGE_KEYS.LAST_CLEANUP);
       return data ? new Date(data) : undefined;
     } catch (error) {
       return undefined;
@@ -362,6 +308,5 @@ class StorageService implements StorageServiceInterface {
   }
 }
 
-// Export singleton instance
 export const storageService = new StorageService();
 export default storageService;
