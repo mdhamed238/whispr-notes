@@ -1,122 +1,51 @@
-# 🎙️ Audio Transcription App
+# Audio Transcription App
 
-A sophisticated React Native application that provides **on-device AI-powered audio transcription** using Whisper model integration. Record audio, transcribe speech to text locally, and manage your transcriptions - all without sending data to the cloud.
+An Expo / React Native app that records speech and transcribes it **on-device** in real time using OpenAI's Whisper (Tiny, English) via [`react-native-executorch`](https://github.com/software-mansion/react-native-executorch). No audio ever leaves the phone.
 
 ## Features
 
 - **Live streaming transcription** — audio is captured in 100 ms chunks and streamed straight into the Whisper model as you speak, with committed and in-progress (interim) text shown separately.
 - **On-device inference** — runs fully offline through ExecuTorch; no server, no API keys, no network calls.
 - **Notes** — recordings are saved as editable notes: title, transcript, and freeform tags, all editable after the fact. Pin the ones you want to keep at the top.
-- **Audio playback** — each note keeps the actual recording (captured to an M4A file alongside the live transcription) so you can play it back from the note.
+- **Audio playback** — each note keeps the actual recording (the same audio samples fed to the model are also encoded into a real WAV file on-device) so you can play it back from the note.
 - **Search** — filter notes by title, transcript text, or tag.
 - **Export & share** — export any note as `.txt`, `.json`, or `.srt` and share it through the native share sheet.
 - **Haptic feedback** on start/stop/save for a more tactile recording experience.
 
-## 🚀 Quick Start
+## Requirements
 
-### Prerequisites
-- Node.js 18+
-- Expo CLI
-- **Physical iOS/Android device** (Simulators/Emulators not supported due to AI model requirements)
+This app **must run on a physical iOS or Android device** — simulators/emulators aren't supported.
 
-### Installation
+| | |
+|---|---|
+| Node.js | 18+ |
+| iOS | Physical device, iOS 16+ |
+| Android | Physical device, Android 13+ (API 33+) |
+| Expo CLI | via `npx expo` (no global install needed) |
+
+On-device model inference (`react-native-executorch`) and real-time audio capture (`react-native-audio-api`) both need native hardware, so this is a [dev client](https://docs.expo.dev/develop/development-builds/introduction/) build, not Expo Go.
+
+## Getting Started
 
 ```bash
-# Clone the repository
-git clone <repository-url>
+git clone https://github.com/mdhamed238/audio-transcription-app.git
 cd audio-transcription-app
-
-# Install dependencies
 npm install
 
-# Start the development server
-npm start
-
-# Run on physical devices only
-npm run ios     # iOS device (not simulator)
-npm run android # Android device (not emulator)
+# build & run a development client on a connected device
+npm run ios      # iOS device
+npm run android   # Android device
 ```
 
-### ⚠️ Important Device Requirements
+On first launch, the Whisper Tiny model downloads and initializes — this takes a few seconds and only happens once.
 
-**This app requires a physical device to run properly.** Simulators and emulators are **not supported** due to:
+## How It Works
 
-- 🤖 **AI Model Inference**: `react-native-executorch` requires native compute capabilities
-- 🎙️ **Real Audio Recording**: Microphone access and audio processing need physical hardware  
-- 🔊 **Audio Processing**: `react-native-audio-api` requires real audio hardware for proper functionality
-- 📱 **Performance**: AI transcription needs device-specific optimizations
-
-**Supported Testing Options:**
-- ✅ **Physical iOS Device** (iOS 16.0+)
-- ✅ **Physical Android Device** (Android 13+, API Level 33+)
-- ❌ **iOS Simulator** (Limited audio/AI capabilities)
-- ❌ **Android Emulator** (No AI model support)
-
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────┐
-│           React Native App              │
-├─────────────────────────────────────────┤
-│  UI: index.tsx (Recording Interface)    │
-├─────────────────────────────────────────┤
-│  Services Layer                         │
-│  ├── audioService.ts                    │
-│  ├── transcriptionService.ts            │
-│  └── storageService.ts                  │
-├─────────────────────────────────────────┤
-│  Native Modules                         │
-│  ├── react-native-executorch (AI)       │
-│  ├── react-native-audio-api             │
-│  └── expo-audio                         │
-└─────────────────────────────────────────┘
-```
-
-## 🔧 Tech Stack
-
-- **React Native 0.81.4** - Cross-platform mobile framework
-- **Expo SDK ~54** - Development platform and tooling
-- **TypeScript** - Type safety and better DX
-- **react-native-executorch 0.5.12** - On-device AI inference
-- **react-native-audio-api 0.9.1** - Advanced audio processing
-- **Whisper Tiny Model** - OpenAI's speech recognition AI
-
-## 📖 Documentation
-
-### 📚 Comprehensive Guides
-- **[📊 Workflow Diagrams](./WORKFLOW_DIAGRAM.md)** - Interactive Mermaid diagrams showing complete app flow
-- **[🔍 Code Analysis](./CODE_ANALYSIS.md)** - In-depth technical walkthrough and architecture analysis
-- **[📋 Technical Documentation](./TECHNICAL_DOCUMENTATION.md)** - Complete implementation guide and API reference
-
-### 🎯 How It Works
-
-1. **🎙️ Record**: Tap to start recording audio with real-time duration tracking
-2. **🔄 Process**: Audio is preprocessed to 16kHz mono format for AI compatibility
-3. **🤖 Transcribe**: Whisper model runs locally to convert speech to text
-4. On stop, the same audio samples fed to the model are also encoded into a real WAV file on-device — the note is saved with the real audio duration and a link to that file.
+1. `AudioRecorder` (`react-native-audio-api`) captures 16kHz mono audio and streams 100ms buffers as they're recorded.
+2. Each buffer is pushed into the model via `useSpeechToText().streamInsert()` — no need to wait for the recording to finish.
+3. The hook exposes `committedTranscription` (finalized text) and `nonCommittedTranscription` (in-flight guess) so the UI can update live.
+4. On stop, the same audio samples fed to the model are also encoded into a real WAV file on-device (`services/wavEncoder.ts`) — the note is saved with the real audio duration and a link to that file.
 5. The Notes tab lists saved notes; tap one to edit its title/transcript/tags, play back the audio, export, or delete it.
-
-## 🎨 Screenshots
-
-```
-┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│   🎙️ Record     │  │  🔄 Processing   │  │  ✅ Complete    │
-│                 │  │                 │  │                 │
-│   ⏺️ 00:45       │  │   🤖 AI Model    │  │  📝 Transcript   │
-│                 │  │   ████░░ 60%    │  │   Hello world!  │
-│   🎯 Ready       │  │                 │  │                 │
-└─────────────────┘  └─────────────────┘  └─────────────────┘
-```
-
-## 🚀 Performance
-
-> **Note**: Performance metrics are based on physical device testing
-
-- **⚡ Fast Startup**: Model loads in ~2-3 seconds (on device)
-- **🧠 Memory Efficient**: ~200MB peak usage during transcription  
-- **📊 Accurate**: 90%+ accuracy for clear English speech
-- **⏱️ Real-Time**: ~3x real-time processing speed (device-dependent)
-- **🔋 Battery Optimized**: Efficient CPU/NPU utilization on supported hardware
 
 ## Project Structure
 
@@ -130,7 +59,8 @@ app/
     └── notes.tsx              # Notes screen — search, pinned section, cards
 
 services/
-└── storageService.ts        # AsyncStorage persistence, export (txt/json/srt), sharing
+├── storageService.ts        # AsyncStorage persistence, export (txt/json/srt), sharing
+└── wavEncoder.ts              # PCM WAV encoding for captured audio
 
 constants/
 ├── config.ts                 # Audio, storage, and export configuration
@@ -141,62 +71,35 @@ types/
 └── index.ts                  # Shared TypeScript types
 ```
 
-## 🔒 Privacy & Security
+## Tech Stack
 
-- ✅ **100% Local Processing** - No data leaves your device
-- ✅ **No Cloud Dependencies** - Complete offline functionality  
-- ✅ **Secure Storage** - Encrypted local data storage
-- ✅ **Permission Control** - Granular microphone and storage permissions
-- ✅ **Open Source** - Transparent and auditable codebase
+- [Expo SDK 54](https://expo.dev) / React Native 0.81 / React 19
+- [expo-router](https://docs.expo.dev/router/introduction/) for file-based navigation
+- [`react-native-executorch`](https://github.com/software-mansion/react-native-executorch) — on-device Whisper Tiny (EN) inference
+- [`react-native-audio-api`](https://github.com/software-mansion/react-native-audio-api) — low-level streaming audio capture
+- [`expo-audio`](https://docs.expo.dev/versions/latest/sdk/audio/) — note playback
+- TypeScript, `@react-native-async-storage/async-storage`, `expo-sharing`, `expo-haptics`
 
-## 🎯 Use Cases
+## Building
 
-- 📝 **Meeting Notes**: Record and transcribe meetings/lectures
-- 📚 **Voice Memos**: Convert voice notes to searchable text
-- ♿ **Accessibility**: Voice-to-text for hearing impaired users
-- 🌍 **Language Learning**: Practice pronunciation with text feedback
-- 📱 **Content Creation**: Transcribe podcasts, interviews, videos
+Native builds are managed with [EAS](https://docs.expo.dev/eas/) via the included `Makefile`:
 
-## 🔮 Roadmap
+```bash
+make preview-ios       # preview build, iOS
+make dev-android       # development build, Android
+make build MODE=production PLATFORM=all
+```
 
-- [ ] **Real-Time Transcription**: Live transcription during recording
-- [ ] **Multiple Languages**: Support for 50+ languages via Whisper
-- [ ] **Speaker Detection**: Identify different speakers in conversations
-- [ ] **Export Formats**: SRT, VTT subtitle format support
-- [ ] **Batch Processing**: Transcribe multiple audio files
-- [ ] **Voice Commands**: Hands-free operation
-- [ ] **Cloud Sync**: Optional encrypted cloud backup
+## Known Limitations
 
-## 🤝 Contributing
+- **English only** — uses the fixed Whisper Tiny EN model; no language selection yet.
+- **Device-only** — no simulator/emulator or web fallback for recording/transcription.
+- **No automated tests configured** — no test runner is wired up in `package.json` yet.
 
-We welcome contributions! Please see our [Contributing Guide](./CONTRIBUTING.md) for details.
+## Status
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+Core loop — record, transcribe live, save, review, export — is implemented and working end to end on-device. Treat this as an actively-developed personal project rather than a polished release: expect rough edges around error states and no CI yet.
 
-## 🙏 Acknowledgments
+## License
 
-- **OpenAI Whisper** - Powerful speech recognition model
-- **Meta ExecuTorch** - On-device AI inference framework
-- **React Native Community** - Amazing ecosystem and tools
-- **Expo Team** - Excellent development platform
-
-## 📞 Support
-
-- 📖 **Documentation**: Check our comprehensive guides above
-- 🐛 **Issues**: Report bugs via GitHub Issues
-- 💬 **Discussions**: Join community discussions
-- 📧 **Contact**: [your-email@domain.com]
-
----
-
-<div align="center">
-
-**Built with ❤️ using React Native & On-Device AI**
-
-[⭐ Star this repo](../../stargazers) | [🐛 Report Bug](../../issues) | [💡 Request Feature](../../issues)
-
-</div>
+No license file yet — all rights reserved by default until one is added.

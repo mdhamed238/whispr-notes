@@ -157,6 +157,22 @@ methods and internal type move from `TranscriptionItem` to `Note`:
 
 ## Audio capture (Record screen)
 
+> **Correction (post-implementation):** the design below assumed
+> `AudioRecorder.enableFileOutput()`/`FileFormat`/`FilePreset` and an async
+> `start()`/`stop()` returning `{status, paths, duration, size}`. That API
+> does not exist in the installed `react-native-audio-api` version (0.9.1) —
+> it was researched against a newer library version than what's actually
+> pinned. `start()`/`stop()` are synchronous `void` in 0.9.1, confirmed
+> directly against `node_modules/react-native-audio-api/lib/typescript/core/AudioRecorder.d.ts`.
+> Discovered mid-implementation (Task 7); the shipped app instead
+> hand-encodes a 16-bit PCM WAV file (`services/wavEncoder.ts`) from the
+> same PCM samples already flowing through `onAudioReady` for streaming
+> transcription, computing duration from sample count / sample rate rather
+> than any recorder-provided result. See the implementation plan
+> (`docs/superpowers/plans/2026-08-14-notes-app-transformation.md`, Task 7)
+> for the corrected design and rationale. The bullets below describe the
+> original, superseded design and are kept for historical context only.
+
 - Before `recorder.start()`, call
   `recorder.enableFileOutput({ format: FileFormat.M4A, preset: FilePreset.High })` —
   M4A/AAC over WAV for a much smaller on-device footprint for voice notes kept
@@ -192,11 +208,12 @@ methods and internal type move from `TranscriptionItem` to `Note`:
   up to 2-3 tag chips (+n overflow). Swipe-to-delete replaces the always-visible trash
   icon. Tap opens Note Detail.
 - **Note Detail** (`app/note/[id].tsx`): editable title + transcript body, autosaved
-  via `updateNote` 800ms after the last keystroke and flushed immediately on screen
-  close (not per-keystroke), play/pause + scrubber
-  via `expo-audio`'s `useAudioPlayer`/`useAudioPlayerStatus` (hidden entirely when
-  `audioUri` is `null`), tag editor (add/remove chips), pin toggle, export (txt/json/srt
-  via existing share sheet), delete.
+  via `updateNote` 800ms after the last keystroke and flushed on every screen-dismissal
+  path (button, swipe, hardware back — not just per-keystroke), play/pause + elapsed/total
+  time via `expo-audio`'s `useAudioPlayer`/`useAudioPlayerStatus` (hidden entirely when
+  `audioUri` is `null`; no seek/scrubber control — that was scoped out during
+  implementation to avoid a new dependency or hand-rolled gesture code), tag editor
+  (add/remove chips), pin toggle, export (txt/json/srt via existing share sheet), delete.
 
 ## Theming
 

@@ -2096,14 +2096,19 @@ git commit -m "docs: update README for the Notes feature (title/tags/pin/playbac
 
 This cannot be run in this environment (no physical device, no simulator support). Once built on-device, verify:
 1. Record → Save → note appears in Notes immediately (no restart needed).
-2. Open a note, edit title and transcript text, close it, reopen — edits persisted.
-3. Play the note's audio; scrubber/time updates; pause works.
-4. Add and remove a tag; pin and unpin a note (pinned section updates).
-5. Search by a word that's only in the transcript body, and by a tag.
-6. Export a note as .txt, .json, and .srt via the share sheet.
-7. Delete a note; confirm it's gone and its audio file no longer takes up space.
-8. Toggle the device's system light/dark mode; confirm both screens and the modal follow it (no leftover hardcoded white/black patches).
-9. Deny microphone permission once (device Settings) and confirm the app now shows an alert instead of failing silently.
+2. Record a long note (5+ minutes) — confirm it doesn't freeze the UI for long, and that the auto-stop safety cap (if hit) shows an alert rather than losing the recording.
+3. Tap Save the instant the "Stop Recording" button changes back to "Start Recording" (i.e. immediately after Stop) — confirm the saved note has real audio attached, not a text-only note (this exercises the async WAV-write-vs-Save race fix; the button should read "Processing audio…" and be disabled during that window).
+4. Start a recording, then press Reset mid-transcript — confirm the transcript clears and no orphaned audio file is left behind.
+5. Open a note, edit title and transcript, then close it via the chevron button — edits persisted. Repeat, but close via swipe-down and separately via the Android hardware back button — edits persisted both ways too.
+6. Edit the title, then within under a second switch to editing the transcript, then immediately swipe the modal closed — confirm BOTH edits persisted (not just the one you were last typing in).
+7. Play a note's audio; time readout updates; pause works; play it a second time after it finishes (confirm it restarts rather than doing nothing).
+8. Add and remove a tag; pin and unpin a note (pinned section updates).
+9. Search by a word that's only in the transcript body, and by a tag.
+10. Export a note as .txt, .json, and .srt via the share sheet.
+11. Delete a note; confirm it's gone.
+12. Toggle the device's system light/dark mode; confirm both screens and the modal follow it, including button text staying legible (not washed-out/low-contrast) on colored buttons in dark mode.
+13. Deny microphone permission once (device Settings) and confirm the app now shows an alert instead of failing silently.
+14. If you have a build from before this change with existing saved notes, install this version over it and confirm old notes still open correctly (derived title, no crash, no player shown since they have no real audio file).
 
 ---
 
