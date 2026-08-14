@@ -1135,7 +1135,7 @@ function createStyles(colors: typeof Colors.light) {
 npx tsc --noEmit
 ```
 
-Expected: remaining errors confined to `app/(tabs)/two.tsx` only (fixed in Task 8).
+Expected: remaining errors confined to `app/(tabs)/two.tsx` (fixed in Task 8), **plus** a typed-route error on this file's own `router.push('/notes')` call — Expo Router's generated route types (`.expo/types/router.d.ts`) don't yet include `/notes` at this point, since Task 8 is what creates `app/(tabs)/notes.tsx`. Both are expected and resolve once Task 8 lands; if the `/notes` error is the *only* thing tsc reports for this file, that's correct, not a regression to chase down here.
 
 - [ ] **Step 3: Commit**
 
