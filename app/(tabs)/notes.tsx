@@ -19,10 +19,22 @@ import { Note } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
-import { Alert, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import {
+  Alert,
+  RefreshControl,
+  SectionList,
+  StatusBar,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+// Only the first screenful gets a staggered entrance; past that the delay
+// would just make scrolling feel laggy.
+const MAX_STAGGERED_ITEMS = 8;
 
 function formatRelativeTime(date: Date): string {
   const diffMs = Date.now() - date.getTime();
@@ -45,22 +57,31 @@ function formatDuration(seconds: number): string {
 export default function NotesScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
-  const styles = createStyles(colors);
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
 
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState('');
+
+  // Bug fix: loadNotes used to flip `loading` on every focus, so coming back
+  // to this tab flashed the skeleton placeholders over content that was
+  // already on screen. The skeletons now only cover the very first load.
+  const hasLoadedOnceRef = useRef(false);
 
   const loadNotes = useCallback(async () => {
     try {
-      setLoading(true);
+      if (!hasLoadedOnceRef.current) {
+        setLoading(true);
+      }
       const items = await storageService.getNotes();
       setNotes(items);
     } catch (error) {
       console.error('Failed to load notes:', error);
       Alert.alert('Error', 'Failed to load notes');
     } finally {
+      hasLoadedOnceRef.current = true;
       setLoading(false);
     }
   }, []);
@@ -73,6 +94,12 @@ export default function NotesScreen() {
     }, [loadNotes])
   );
 
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadNotes();
+    setRefreshing(false);
+  }, [loadNotes]);
+
   const filteredNotes = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return notes;
@@ -84,40 +111,58 @@ export default function NotesScreen() {
     );
   }, [notes, query]);
 
-  const pinnedNotes = useMemo(() => filteredNotes.filter((note) => note.pinned), [filteredNotes]);
-  const otherNotes = useMemo(() => filteredNotes.filter((note) => !note.pinned), [filteredNotes]);
+  const sections = useMemo(() => {
+    const pinned = filteredNotes.filter((note) => note.pinned);
+    const others = filteredNotes.filter((note) => !note.pinned);
 
-  const handleTogglePin = async (note: Note) => {
-    try {
-      await storageService.updateNote(note.id, { pinned: !note.pinned });
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      loadNotes();
-    } catch (error) {
-      console.error('Failed to update note:', error);
-      Alert.alert('Error', 'Failed to update note');
+    // Without any pinned notes there's nothing to distinguish, so the list
+    // reads better with no section headers at all.
+    if (pinned.length === 0) {
+      return [{ title: null, data: others }];
     }
-  };
+    return [
+      { title: 'Pinned', data: pinned },
+      { title: 'All Notes', data: others },
+    ].filter((section) => section.data.length > 0);
+  }, [filteredNotes]);
 
-  const handleDelete = (note: Note) => {
-    Alert.alert('Delete Note', 'Are you sure you want to delete this note?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await storageService.deleteNote(note.id);
-            loadNotes();
-          } catch (error) {
-            console.error('Failed to delete note:', error);
-            Alert.alert('Error', 'Failed to delete note');
-          }
+  const handleTogglePin = useCallback(
+    async (note: Note) => {
+      try {
+        await storageService.updateNote(note.id, { pinned: !note.pinned });
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        loadNotes();
+      } catch (error) {
+        console.error('Failed to update note:', error);
+        Alert.alert('Error', 'Failed to update note');
+      }
+    },
+    [loadNotes]
+  );
+
+  const handleDelete = useCallback(
+    (note: Note) => {
+      Alert.alert('Delete Note', 'Are you sure you want to delete this note?', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await storageService.deleteNote(note.id);
+              loadNotes();
+            } catch (error) {
+              console.error('Failed to delete note:', error);
+              Alert.alert('Error', 'Failed to delete note');
+            }
+          },
         },
-      },
-    ]);
-  };
+      ]);
+    },
+    [loadNotes]
+  );
 
-  const handleExport = async (note: Note) => {
+  const handleExport = useCallback(async (note: Note) => {
     try {
       const fileUri = await storageService.exportNote(note.id, { format: 'txt', includeMetadata: true });
       await storageService.shareExportedFile(fileUri);
@@ -125,62 +170,48 @@ export default function NotesScreen() {
       console.error('Failed to export note:', error);
       Alert.alert('Error', 'Failed to export note');
     }
-  };
+  }, []);
 
-  const handleOpenActions = (note: Note) => {
-    Alert.alert(note.title, undefined, [
-      { text: note.pinned ? 'Unpin' : 'Pin', onPress: () => handleTogglePin(note) },
-      { text: 'Export', onPress: () => handleExport(note) },
-      { text: 'Delete', style: 'destructive', onPress: () => handleDelete(note) },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  };
-
-  const renderNoteCard = (note: Note, index: number) => (
-    <AnimatedPressable
-      key={note.id}
-      entering={FadeInDown.delay(Math.min(index, 8) * 45).duration(320)}
-      haptic="selection"
-      style={styles.card}
-      onPress={() => router.push(`/note/${note.id}`)}
-    >
-      <View style={styles.cardHeader}>
-        <View style={styles.cardTitleRow}>
-          {note.pinned && (
-            <View style={styles.pinBadge}>
-              <Ionicons name="bookmark" size={11} color={colors.tint} />
-            </View>
-          )}
-          <Text style={styles.cardTitle} numberOfLines={1}>
-            {note.title}
-          </Text>
-        </View>
-        <IconButton
-          name="ellipsis-horizontal"
-          size={16}
-          background={colors.surface}
-          onPress={() => handleOpenActions(note)}
-        />
-      </View>
-      <Text style={styles.cardSnippet} numberOfLines={2}>
-        {note.transcription || 'No transcription text'}
-      </Text>
-      <View style={styles.cardMeta}>
-        <View style={styles.metaLeft}>
-          <Chip label={formatDuration(note.duration)} tone="muted" />
-          <Text style={styles.metaText}>{formatRelativeTime(note.createdAt)}</Text>
-        </View>
-        {note.tags.length > 0 && (
-          <View style={styles.tagRow}>
-            {note.tags.slice(0, 2).map((tag) => (
-              <Chip key={tag} label={tag} tone="tint" />
-            ))}
-            {note.tags.length > 2 && <Text style={styles.metaText}>+{note.tags.length - 2}</Text>}
-          </View>
-        )}
-      </View>
-    </AnimatedPressable>
+  const handleOpenActions = useCallback(
+    (note: Note) => {
+      Alert.alert(note.title, undefined, [
+        { text: note.pinned ? 'Unpin' : 'Pin', onPress: () => handleTogglePin(note) },
+        { text: 'Export', onPress: () => handleExport(note) },
+        { text: 'Delete', style: 'destructive', onPress: () => handleDelete(note) },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
+    },
+    [handleTogglePin, handleExport, handleDelete]
   );
+
+  const handleOpenNote = useCallback(
+    (note: Note) => {
+      router.push(`/note/${note.id}`);
+    },
+    [router]
+  );
+
+  const renderItem = useCallback(
+    ({ item, index }: { item: Note; index: number }) => (
+      <NoteCard
+        note={item}
+        index={index}
+        colors={colors}
+        styles={styles}
+        onPress={handleOpenNote}
+        onActions={handleOpenActions}
+      />
+    ),
+    [colors, styles, handleOpenNote, handleOpenActions]
+  );
+
+  const renderSectionHeader = useCallback(
+    ({ section }: { section: { title: string | null } }) =>
+      section.title ? <Text style={styles.sectionLabel}>{section.title}</Text> : null,
+    [styles]
+  );
+
+  const keyExtractor = useCallback((note: Note) => note.id, []);
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -218,24 +249,91 @@ export default function NotesScreen() {
           subtitle={query ? 'Try a different search term.' : 'Record and save your first note to see it here.'}
         />
       ) : (
-        <ScrollView
+        // Virtualized: the previous ScrollView mounted every saved note at
+        // once (up to MAX_HISTORY_ITEMS), so a large library paid the full
+        // render cost on every focus.
+        <SectionList
+          sections={sections}
+          keyExtractor={keyExtractor}
+          renderItem={renderItem}
+          renderSectionHeader={renderSectionHeader}
           style={styles.scroll}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
-        >
-          {pinnedNotes.length > 0 && (
-            <>
-              <Text style={styles.sectionLabel}>Pinned</Text>
-              {pinnedNotes.map(renderNoteCard)}
-              <Text style={[styles.sectionLabel, { marginTop: Spacing.lg }]}>All Notes</Text>
-            </>
-          )}
-          {otherNotes.map(renderNoteCard)}
-        </ScrollView>
+          stickySectionHeadersEnabled={false}
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          removeClippedSubviews
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.tint} />
+          }
+        />
       )}
     </SafeAreaView>
   );
 }
+
+const NoteCard = React.memo(function NoteCard({
+  note,
+  index,
+  colors,
+  styles,
+  onPress,
+  onActions,
+}: {
+  note: Note;
+  index: number;
+  colors: typeof Colors.light;
+  styles: ReturnType<typeof createStyles>;
+  onPress: (note: Note) => void;
+  onActions: (note: Note) => void;
+}) {
+  return (
+    <AnimatedPressable
+      entering={FadeInDown.delay(Math.min(index, MAX_STAGGERED_ITEMS) * 45).duration(320)}
+      haptic="selection"
+      style={styles.card}
+      onPress={() => onPress(note)}
+    >
+      <View style={styles.cardHeader}>
+        <View style={styles.cardTitleRow}>
+          {note.pinned && (
+            <View style={styles.pinBadge}>
+              <Ionicons name="bookmark" size={11} color={colors.tint} />
+            </View>
+          )}
+          <Text style={styles.cardTitle} numberOfLines={1}>
+            {note.title}
+          </Text>
+        </View>
+        <IconButton
+          name="ellipsis-horizontal"
+          size={16}
+          background={colors.surface}
+          onPress={() => onActions(note)}
+        />
+      </View>
+      <Text style={styles.cardSnippet} numberOfLines={2}>
+        {note.transcription || 'No transcription text'}
+      </Text>
+      <View style={styles.cardMeta}>
+        <View style={styles.metaLeft}>
+          <Chip label={formatDuration(note.duration)} tone="muted" />
+          <Text style={styles.metaText}>{formatRelativeTime(note.createdAt)}</Text>
+        </View>
+        {note.tags.length > 0 && (
+          <View style={styles.tagRow}>
+            {note.tags.slice(0, 2).map((tag) => (
+              <Chip key={tag} label={tag} tone="tint" />
+            ))}
+            {note.tags.length > 2 && <Text style={styles.metaText}>+{note.tags.length - 2}</Text>}
+          </View>
+        )}
+      </View>
+    </AnimatedPressable>
+  );
+});
 
 function createStyles(colors: typeof Colors.light) {
   return StyleSheet.create({
@@ -252,6 +350,7 @@ function createStyles(colors: typeof Colors.light) {
       letterSpacing: 0.6,
       marginBottom: Spacing.sm,
       marginTop: Spacing.xs,
+      backgroundColor: colors.background,
     },
     card: {
       backgroundColor: colors.card,

@@ -18,10 +18,11 @@ export const STORAGE_KEYS = {
 // Notes list limits
 export const UI_CONFIG = {
   MAX_HISTORY_ITEMS: 1000,
-  // Safety cap: the WAV encode on stop is fully synchronous, so an
-  // unbounded recording risks a long UI freeze (or worse) for very long
-  // sessions. Recording auto-stops once this is hit.
-  MAX_RECORDING_DURATION_SECONDS: 300,
+  // Audio is now streamed to disk as it arrives (see services/wavEncoder),
+  // so stopping is a 44-byte header patch rather than a full synchronous
+  // encode — length is bounded by disk space, not the JS heap. This cap is
+  // now just a runaway guard for a recording left running by accident.
+  MAX_RECORDING_DURATION_SECONDS: 3600,
 } as const;
 
 // User-facing error messages for failure paths that are actually wired up

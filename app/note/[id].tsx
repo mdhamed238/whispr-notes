@@ -39,7 +39,7 @@ export default function NoteDetailScreen() {
   const navigation = useNavigation();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
-  const styles = createStyles(colors);
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   const [note, setNote] = useState<Note | null>(null);
   const [loading, setLoading] = useState(true);
@@ -317,7 +317,10 @@ export default function NoteDetailScreen() {
 function NotePlayer({ uri, colors }: { uri: string; colors: typeof Colors.light }) {
   const player = useAudioPlayer(uri);
   const status = useAudioPlayerStatus(player);
-  const styles = createStyles(colors);
+  // useAudioPlayerStatus re-renders this component on every playback tick,
+  // so building the stylesheet inline here re-ran StyleSheet.create several
+  // times a second for the whole time a note was playing.
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const progress = useSharedValue(0);
 
   const bars = useMemo(

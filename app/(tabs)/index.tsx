@@ -1,7 +1,8 @@
 /**
  * Record Screen
- * Streaming transcription via react-native-executorch, with a real audio
- * file captured alongside the stream (for playback from the Notes screens).
+ * Streaming transcription via react-native-executorch, with the raw audio
+ * streamed to a real WAV file alongside it (for playback from the Notes
+ * screens).
  */
 
 import Button from '@/components/ui/Button';
@@ -14,38 +15,47 @@ import { AUDIO_CONFIG, ERROR_MESSAGES, UI_CONFIG } from '@/constants/config';
 import { FontSize, Spacing } from '@/constants/Spacing';
 import { Radius, Shadow } from '@/constants/theme';
 import storageService from '@/services/storageService';
-import { computeDurationSeconds, encodeWavBase64 } from '@/services/wavEncoder';
+import { WavFileWriter } from '@/services/wavEncoder';
 import { Note } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   ScrollView,
   StatusBar,
+  StyleProp,
   StyleSheet,
   Text,
+  TextStyle,
   View,
 } from 'react-native';
 import { AudioManager, AudioRecorder } from 'react-native-audio-api';
-import { useSpeechToText, WHISPER_TINY_EN } from 'react-native-executorch';
+import { models, useSpeechToText } from 'react-native-executorch';
 import Animated, {
   Easing,
   FadeIn,
   FadeInDown,
+  SharedValue,
   useAnimatedStyle,
+  useDerivedValue,
   useSharedValue,
   withDelay,
   withRepeat,
-  withSequence,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import AnimatedPressable from '@/components/ui/AnimatedPressable';
+
+// How close to the bottom (in px) the transcript must be for new text to
+// keep auto-scrolling. Scrolling up past this parks the view so the user
+// can read back through a long transcript without being yanked down.
+const AUTOSCROLL_STICK_THRESHOLD = 32;
 
 function buildAutoTitle(transcription: string): string {
   const trimmed = transcription.trim();
@@ -60,13 +70,22 @@ function buildAutoTitle(transcription: string): string {
   })}`;
 }
 
+function formatClock(totalSeconds: number): string {
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = Math.floor(totalSeconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+function countWords(text: string): number {
+  const trimmed = text.trim();
+  return trimmed ? trimmed.split(/\s+/).length : 0;
+}
+
 export default function RecordScreen() {
-  // Bug fix: the old Reset button had no way to clear the model hook's
-  // internal committedTranscription (no reset/clear API is exposed by
-  // useSpeechToText). Remounting the whole session subtree on a fresh key
-  // guarantees a clean AudioRecorder + model instance instead of relying on
-  // undocumented internals — this also means each session gets its own
-  // onAudioReady registration, so nothing accumulates across sessions.
+  // Remounting the whole session subtree on a fresh key guarantees a clean
+  // AudioRecorder + model instance on Reset, rather than relying on internal
+  // hook state — this also means each session gets its own onAudioReady
+  // registration, so nothing accumulates across sessions.
   const [sessionId, setSessionId] = useState(0);
   return <RecordingSession key={sessionId} onSessionReset={() => setSessionId((n) => n + 1)} />;
 }
@@ -74,7 +93,11 @@ export default function RecordScreen() {
 function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
-  const styles = createStyles(colors);
+  // Memoized so the style objects keep a stable identity across the many
+  // re-renders a live transcription drives — without this, StyleSheet.create
+  // ran on every stream tick and every memoized child below would still see
+  // a new `style` prop and re-render anyway.
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
 
   const [recorder] = useState(
@@ -85,7 +108,24 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       })
   );
 
-  const model = useSpeechToText({ model: WHISPER_TINY_EN });
+  // VAD-gated streaming (added in v0.9.0) commits text once a short silence
+  // is detected instead of endlessly re-transcribing a growing buffer on
+  // every iteration — this is what actually cuts the multi-second commit
+  // lag down, not just the library bump itself.
+  //
+  // English-only export. The multilingual `whisper_base()` (EN/FR/AR via a
+  // `language` option on stream()) was tried and reverted: it threw
+  // "[Whisper] The 'decode' method did not succeed" on device. That is not a
+  // bad download (the cached .pte is byte-exact against Hugging Face) nor a
+  // tokenizer gap (<|en|>/<|fr|>/<|ar|> are all present in its 51,865-token
+  // vocab), so the cause is still unknown. To re-enable once it's understood:
+  // swap this to whisper_base(), pass `language` to stream() below, and
+  // restore the language picker — note the library throws if `language` is
+  // passed to a non-multilingual model, so those two must change together.
+  const model = useSpeechToText({
+    vad: models.vad.fsmn_vad(),
+    model: models.speech_to_text.whisper_base_en(),
+  });
 
   // Bug fix: useSpeechToText rebuilds `streamInsert` (via useCallback keyed
   // on `isReady`) every time readiness changes, and the rebuilt version
@@ -101,35 +141,56 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
   const modelRef = useRef(model);
   modelRef.current = model;
 
-  // The installed react-native-audio-api has no file-output API, so we
-  // accumulate the same raw PCM samples already streamed into the model
-  // and encode them into a real WAV file ourselves on stop.
-  const samplesRef = useRef<number[]>([]);
+  // v0.9.3 removed the hook's own committedTranscription/nonCommittedTranscription
+  // — the caller now has to consume model.stream()'s async generator and
+  // accumulate the text itself. transcriptRef backs the accumulation (so the
+  // streaming loop always appends to the latest value even across renders);
+  // transcript state is just its mirror for rendering.
+  const transcriptRef = useRef({ committed: '', nonCommitted: '' });
+  const [transcript, setTranscript] = useState({ committed: '', nonCommitted: '' });
+
+  // Audio is streamed straight to a WAV file on disk as it arrives rather
+  // than accumulated in memory and encoded on stop — see
+  // services/wavEncoder.ts for why that matters for long recordings.
+  const writerRef = useRef<WavFileWriter | null>(null);
+
+  // Live input level (RMS per buffer), consumed by the waveform on the UI
+  // thread. A shared value keeps the 10Hz meter off the React render path
+  // entirely, so it costs nothing per frame.
+  const audioLevel = useSharedValue(0);
 
   const [captured, setCaptured] = useState<{ audioUri: string | null; duration: number }>({
     audioUri: null,
     duration: 0,
   });
   const [isSaving, setIsSaving] = useState(false);
-  // Bug fix: handleStopStreaming is async (it encodes + writes the WAV to
-  // disk) but nothing used to disable Save while that was in flight. The
+  // Bug fix: handleStopStreaming does async work (deleting a superseded
+  // capture) but nothing used to disable Save while that was in flight. The
   // render condition that shows Save only checked `!model.isGenerating`,
-  // which flips true the instant streamStop() runs, well before the WAV
-  // finishes writing — tapping Save in that window silently produced a
-  // text-only note even though a real recording was made.
+  // which flips true the instant streamStop() runs — tapping Save in that
+  // window could save a note out from under the real recording.
   const [isCapturingAudio, setIsCapturingAudio] = useState(false);
 
-  // Safety cap: samplesRef accumulates every sample with no limit and the
-  // WAV encode on stop is fully synchronous, so an unbounded recording
-  // risks a long UI freeze. This timer force-stops recording once the cap
-  // is hit.
+  // Runaway guard: force-stops a recording left running by accident.
   const maxDurationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Bug fix: stop can be triggered from three places at once (the stop
+  // button, the max-duration timer, and the stream error path). Without
+  // this guard a double-stop could finalize the WAV twice and clobber the
+  // freshly-captured file with a null result.
+  const isStoppingRef = useRef(false);
+
+  const transcriptScrollRef = useRef<ScrollView>(null);
+  const stickToBottomRef = useRef(true);
 
   useEffect(() => {
     return () => {
       if (maxDurationTimer.current) {
         clearTimeout(maxDurationTimer.current);
       }
+      // The session subtree is remounted on Reset/Save, so a writer still
+      // open here belongs to a recording that will never be saved.
+      writerRef.current?.discard();
+      writerRef.current = null;
     };
   }, []);
 
@@ -140,11 +201,17 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       iosOptions: ['allowBluetooth', 'defaultToSpeaker'],
     });
 
-    recorder.onAudioReady(async ({ buffer }) => {
+    recorder.onAudioReady(({ buffer }) => {
       try {
-        const bufferArray = Array.from(buffer.getChannelData(0));
-        samplesRef.current.push(...bufferArray);
-        modelRef.current.streamInsert(bufferArray);
+        const channelData = buffer.getChannelData(0);
+        modelRef.current.streamInsert(channelData);
+        writerRef.current?.write(channelData);
+
+        let sumSquares = 0;
+        for (let i = 0; i < channelData.length; i++) {
+          sumSquares += channelData[i] * channelData[i];
+        }
+        audioLevel.value = Math.sqrt(sumSquares / channelData.length);
       } catch (error) {
         console.error('Audio buffer processing error:', error);
       }
@@ -164,7 +231,16 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
         return;
       }
 
-      samplesRef.current = [];
+      transcriptRef.current = { committed: '', nonCommitted: '' };
+      setTranscript({ committed: '', nonCommitted: '' });
+      stickToBottomRef.current = true;
+      isStoppingRef.current = false;
+
+      // Any writer still open here is from a stop that failed partway; drop
+      // its partial file rather than leaking it.
+      writerRef.current?.discard();
+      writerRef.current = WavFileWriter.create(AUDIO_CONFIG.sampleRate);
+
       recorder.start();
       // Bug fix: this haptic used to fire after `await model.stream()`,
       // which doesn't resolve until streaming actually stops — so the
@@ -182,7 +258,18 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       }, UI_CONFIG.MAX_RECORDING_DURATION_SECONDS * 1000);
 
       try {
-        await model.stream();
+        // 300ms (down from 500ms): shorter silence gaps count as a commit
+        // point, so continuous speech with only brief pauses still gets
+        // incremental commits instead of holding everything as
+        // non-committed until a long enough gap flushes it all at once.
+        const streamIter = model.stream({ useVAD: true, vadDetectionMargin: 300 });
+        for await (const { committed, nonCommitted } of streamIter) {
+          if (committed.text) {
+            transcriptRef.current.committed += committed.text;
+          }
+          transcriptRef.current.nonCommitted = nonCommitted.text ?? '';
+          setTranscript({ ...transcriptRef.current });
+        }
       } catch (error) {
         console.error('Transcription error:', error);
         handleStopStreaming();
@@ -195,18 +282,21 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       }
     } catch (error) {
       console.error('Failed to start streaming:', error);
+      writerRef.current?.discard();
+      writerRef.current = null;
       Alert.alert('Error', ERROR_MESSAGES.RECORDING_FAILED);
     }
   };
 
   const handleStopStreaming = async () => {
-    // Bug fix: gate Save on this flag (see the isCapturingAudio comment
-    // above) so a tap that lands between streamStop() and the WAV finishing
-    // its write can't save a text-only note out from under a real recording.
+    if (isStoppingRef.current) return;
+    isStoppingRef.current = true;
+
     setIsCapturingAudio(true);
     try {
       recorder.stop();
       model.streamStop();
+      audioLevel.value = 0;
 
       if (maxDurationTimer.current) {
         clearTimeout(maxDurationTimer.current);
@@ -224,39 +314,29 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
         }
       }
 
-      // Bug fix: audioUri/duration used to be hardcoded ('streaming_recording'
-      // and 0) on every save. Now they come from a real WAV file encoded from
-      // the same PCM samples fed to the model (see services/wavEncoder.ts).
-      const sampleCount = samplesRef.current.length;
-      if (sampleCount > 0) {
-        const wavBase64 = encodeWavBase64(samplesRef.current, AUDIO_CONFIG.sampleRate);
-        const audioDir = `${FileSystem.documentDirectory}audio/`;
-        const dirInfo = await FileSystem.getInfoAsync(audioDir);
-        if (!dirInfo.exists) {
-          await FileSystem.makeDirectoryAsync(audioDir, { intermediates: true });
-        }
-        const fileUri = `${audioDir}note-${Date.now()}.wav`;
-        await FileSystem.writeAsStringAsync(fileUri, wavBase64, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        setCaptured({
-          audioUri: fileUri,
-          duration: computeDurationSeconds(sampleCount, AUDIO_CONFIG.sampleRate),
-        });
-      } else {
-        setCaptured({ audioUri: null, duration: 0 });
-      }
+      // Just a 44-byte header patch — the PCM was already written to disk
+      // as it arrived, so there is no encode pass to block on here.
+      const writer = writerRef.current;
+      writerRef.current = null;
+      const result = writer ? writer.finalize() : null;
+
+      setCaptured(
+        result
+          ? { audioUri: result.uri, duration: result.durationSeconds }
+          : { audioUri: null, duration: 0 }
+      );
 
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } catch (error) {
       console.error('Failed to stop streaming:', error);
     } finally {
       setIsCapturingAudio(false);
+      isStoppingRef.current = false;
     }
   };
 
   const handleSaveTranscription = async () => {
-    if (!model.committedTranscription) {
+    if (!transcript.committed) {
       Alert.alert('No Transcription', 'Nothing to save. Try recording some speech first.');
       return;
     }
@@ -266,8 +346,8 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       const now = new Date();
       const note: Note = {
         id: now.getTime().toString(),
-        title: buildAutoTitle(model.committedTranscription),
-        transcription: model.committedTranscription,
+        title: buildAutoTitle(transcript.committed),
+        transcription: transcript.committed,
         audioUri: captured.audioUri,
         duration: captured.duration,
         tags: [],
@@ -307,6 +387,18 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
     onSessionReset();
   };
 
+  const handleTranscriptScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+    const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+    stickToBottomRef.current = distanceFromBottom <= AUTOSCROLL_STICK_THRESHOLD;
+  }, []);
+
+  const handleTranscriptContentSizeChange = useCallback(() => {
+    if (stickToBottomRef.current) {
+      transcriptScrollRef.current?.scrollToEnd({ animated: true });
+    }
+  }, []);
+
   const downloadProgress = useSharedValue(0);
   useEffect(() => {
     downloadProgress.value = withTiming(model.downloadProgress, { duration: 300 });
@@ -315,7 +407,8 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
     width: `${Math.min(downloadProgress.value, 1) * 100}%`,
   }));
 
-  const hasTranscript = Boolean(model.committedTranscription || model.nonCommittedTranscription);
+  const hasTranscript = Boolean(transcript.committed || transcript.nonCommitted);
+  const wordCount = useMemo(() => countWords(transcript.committed), [transcript.committed]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -354,21 +447,41 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
                 onPress={model.isGenerating ? handleStopStreaming : handleStartStreaming}
                 colors={colors}
               />
-              <Text style={styles.recordButtonText}>
-                {model.isGenerating ? 'Recording…' : 'Tap to start recording'}
-              </Text>
-              {model.isGenerating && <Waveform colors={colors} />}
+              <RecordingStatus
+                isRecording={model.isGenerating}
+                level={audioLevel}
+                colors={colors}
+                styles={styles}
+              />
             </View>
 
             <Card style={styles.transcriptionCard} elevation="sm">
-              <Text style={styles.transcriptionLabel}>{model.isGenerating ? 'Listening…' : 'Transcription'}</Text>
+              <View style={styles.transcriptionHeader}>
+                <Text style={styles.transcriptionLabel}>
+                  {model.isGenerating ? 'Listening…' : 'Transcription'}
+                </Text>
+                {wordCount > 0 && (
+                  <Text style={styles.wordCount}>
+                    {wordCount} word{wordCount === 1 ? '' : 's'}
+                  </Text>
+                )}
+              </View>
 
-              <ScrollView style={styles.transcriptionScroll} showsVerticalScrollIndicator={false}>
+              <ScrollView
+                ref={transcriptScrollRef}
+                style={styles.transcriptionScroll}
+                showsVerticalScrollIndicator={false}
+                onScroll={handleTranscriptScroll}
+                scrollEventThrottle={64}
+                onContentSizeChange={handleTranscriptContentSizeChange}
+              >
                 {hasTranscript ? (
                   <Text style={styles.transcriptionText}>
-                    <Text style={styles.committedText}>{model.committedTranscription}</Text>
-                    {model.nonCommittedTranscription && (
-                      <Text style={styles.nonCommittedText}> {model.nonCommittedTranscription}</Text>
+                    {/* Memoized so a growing committed transcript isn't
+                        re-rendered on every interim (non-committed) update. */}
+                    <CommittedTranscript text={transcript.committed} style={styles.committedText} />
+                    {transcript.nonCommitted && (
+                      <Text style={styles.nonCommittedText}> {transcript.nonCommitted}</Text>
                     )}
                   </Text>
                 ) : (
@@ -379,7 +492,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
               </ScrollView>
 
               {hasTranscript && !model.isGenerating && (
-                <View style={styles.actionButtons}>
+                <Animated.View entering={FadeIn.duration(200)} style={styles.actionButtons}>
                   <Button
                     label={isSaving ? 'Saving…' : isCapturingAudio ? 'Processing audio…' : 'Save'}
                     icon="checkmark-circle"
@@ -398,13 +511,65 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
                     onPress={handleReset}
                     style={styles.resetButton}
                   />
-                </View>
+                </Animated.View>
               )}
             </Card>
           </Animated.View>
         )}
       </View>
     </SafeAreaView>
+  );
+}
+
+const CommittedTranscript = React.memo(function CommittedTranscript({
+  text,
+  style,
+}: {
+  text: string;
+  style: StyleProp<TextStyle>;
+}) {
+  return <Text style={style}>{text}</Text>;
+});
+
+/**
+ * Elapsed time + live waveform while recording, idle hint otherwise.
+ * Split out so the once-a-second clock tick re-renders only this subtree
+ * rather than the whole screen (and the growing transcript with it).
+ */
+function RecordingStatus({
+  isRecording,
+  level,
+  colors,
+  styles,
+}: {
+  isRecording: boolean;
+  level: SharedValue<number>;
+  colors: typeof Colors.light;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  const [seconds, setSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!isRecording) {
+      setSeconds(0);
+      return;
+    }
+    const startedAt = Date.now();
+    // Derive from wall-clock rather than incrementing a counter, so the
+    // display can't drift if a tick is delayed by inference work.
+    const id = setInterval(() => setSeconds(Math.floor((Date.now() - startedAt) / 1000)), 250);
+    return () => clearInterval(id);
+  }, [isRecording]);
+
+  if (!isRecording) {
+    return <Text style={styles.recordButtonText}>Tap to start recording</Text>;
+  }
+
+  return (
+    <>
+      <Text style={styles.elapsedText}>{formatClock(seconds)}</Text>
+      <Waveform level={level} colors={colors} />
+    </>
   );
 }
 
@@ -501,36 +666,49 @@ const pulseStyles = StyleSheet.create({
   },
 });
 
-const WAVE_BAR_COUNT = 5;
+// Centre bars react most, giving the meter a natural spectrum-ish shape.
+const WAVE_BAR_WEIGHTS = [0.35, 0.62, 0.85, 1, 0.85, 0.62, 0.35];
+const WAVE_BAR_MIN_HEIGHT = 6;
+const WAVE_BAR_RANGE = 28;
+// Speech RMS sits well below 1.0, so the raw level needs scaling up before
+// it maps onto a full-height bar.
+const WAVE_LEVEL_GAIN = 7;
 
-function Waveform({ colors }: { colors: typeof Colors.light }) {
+function Waveform({ level, colors }: { level: SharedValue<number>; colors: typeof Colors.light }) {
+  // The level updates at ~10Hz (one buffer per 100ms); easing between those
+  // steps on the UI thread is what makes it read as a smooth meter rather
+  // than a strobe.
+  const smoothed = useDerivedValue(() =>
+    withTiming(Math.min(1, level.value * WAVE_LEVEL_GAIN), { duration: 120 })
+  );
+
   return (
     <View style={waveStyles.row}>
-      {Array.from({ length: WAVE_BAR_COUNT }).map((_, i) => (
-        <WaveBar key={i} index={i} colors={colors} />
+      {WAVE_BAR_WEIGHTS.map((weight, i) => (
+        <WaveBar key={i} weight={weight} level={smoothed} colors={colors} />
       ))}
     </View>
   );
 }
 
-function WaveBar({ index, colors }: { index: number; colors: typeof Colors.light }) {
-  const height = useSharedValue(8);
-
-  useEffect(() => {
-    const target = 14 + ((index * 7) % 18);
-    height.value = withDelay(
-      index * 90,
-      withRepeat(withSequence(withTiming(target, { duration: 380 }), withTiming(8, { duration: 380 })), -1, true)
-    );
-  }, [height, index]);
-
-  const style = useAnimatedStyle(() => ({ height: height.value }));
+function WaveBar({
+  weight,
+  level,
+  colors,
+}: {
+  weight: number;
+  level: SharedValue<number>;
+  colors: typeof Colors.light;
+}) {
+  const style = useAnimatedStyle(() => ({
+    height: WAVE_BAR_MIN_HEIGHT + level.value * weight * WAVE_BAR_RANGE,
+  }));
 
   return <Animated.View style={[waveStyles.bar, { backgroundColor: colors.tint }, style]} />;
 }
 
 const waveStyles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, height: 32, marginTop: Spacing.md },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 36, marginTop: Spacing.sm },
   bar: { width: 5, borderRadius: 3 },
 });
 
@@ -550,18 +728,30 @@ function createStyles(colors: typeof Colors.light) {
       overflow: 'hidden',
     },
     progressFill: { height: '100%', backgroundColor: colors.tint, borderRadius: Radius.pill },
-    recordButtonContainer: { alignItems: 'center', marginBottom: Spacing.xl },
+    recordButtonContainer: { alignItems: 'center', marginBottom: Spacing.lg },
     recordButtonText: { fontSize: FontSize.md, fontWeight: '600', color: colors.textMuted, marginTop: Spacing.sm },
+    elapsedText: {
+      fontSize: FontSize.lg,
+      fontWeight: '700',
+      color: colors.danger,
+      marginTop: Spacing.sm,
+      fontVariant: ['tabular-nums'],
+    },
     transcriptionCard: { flex: 1 },
+    transcriptionHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: Spacing.md,
+    },
     transcriptionLabel: {
       fontSize: FontSize.sm,
       fontWeight: '700',
       color: colors.textMuted,
       textTransform: 'uppercase',
       letterSpacing: 0.6,
-      marginBottom: Spacing.md,
-      textAlign: 'center',
     },
+    wordCount: { fontSize: FontSize.xs, fontWeight: '600', color: colors.textMuted },
     transcriptionScroll: { flex: 1 },
     transcriptionText: { fontSize: FontSize.lg, lineHeight: 27 },
     committedText: { color: colors.text, fontWeight: '600' },
