@@ -20,7 +20,8 @@
         "UIBackgroundModes": [
           "audio"
         ]
-      }
+      },
+      "bundleIdentifier": "com.mdhamed.off.audiotranscriptionapp"
     },
     "android": {
       "adaptiveIcon": {
@@ -34,7 +35,9 @@
         "WRITE_EXTERNAL_STORAGE",
         "READ_EXTERNAL_STORAGE",
         "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS"
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ],
       "package": "com.mdhamed.off.audiotranscriptionapp"
     },
@@ -54,14 +57,17 @@
           "androidPermissions": [
             "android.permission.MODIFY_AUDIO_SETTINGS",
             "android.permission.FOREGROUND_SERVICE",
-            "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+            "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+            "android.permission.FOREGROUND_SERVICE_MICROPHONE"
           ],
           "androidForegroundService": true,
           "androidFSTypes": [
-            "mediaPlayback"
+            "mediaPlayback",
+            "microphone"
           ]
         }
-      ]
+      ],
+      "expo-build-properties"
     ],
     "experiments": {
       "typedRoutes": true
@@ -69,8 +75,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "1c8c8a44-123d-4942-a893-f0d95d0ddce4"
+        "projectId": "b4ecdfb9-71ef-4bca-9728-2a264cdfd87e"
       }
-    }
+    },
+    "owner": "mdhamed.dev"
   }
 }
