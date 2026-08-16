@@ -8,8 +8,10 @@ export const Spacing = {
 } as const;
 
 export const FontSize = {
+  xs: 12,
   sm: 13,
   md: 16,
   lg: 20,
-  xl: 28,
+  xl: 26,
+  xxl: 32,
 } as const;

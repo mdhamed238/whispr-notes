@@ -3,24 +3,25 @@
  * Search, pinned section, and card list of saved notes.
  */
 
+import AnimatedPressable from '@/components/ui/AnimatedPressable';
+import Chip from '@/components/ui/Chip';
+import EmptyState from '@/components/ui/EmptyState';
+import IconButton from '@/components/ui/IconButton';
+import ScreenHeader from '@/components/ui/ScreenHeader';
+import Skeleton from '@/components/ui/Skeleton';
+import TextField from '@/components/ui/TextField';
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { FontSize, Spacing } from '@/constants/Spacing';
+import { Radius, Shadow } from '@/constants/theme';
 import storageService from '@/services/storageService';
 import { Note } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
-import {
-  Alert,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Alert, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 function formatRelativeTime(date: Date): string {
@@ -89,6 +90,7 @@ export default function NotesScreen() {
   const handleTogglePin = async (note: Note) => {
     try {
       await storageService.updateNote(note.id, { pinned: !note.pinned });
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       loadNotes();
     } catch (error) {
       console.error('Failed to update note:', error);
@@ -134,74 +136,93 @@ export default function NotesScreen() {
     ]);
   };
 
-  const renderNoteCard = (note: Note) => (
-    <TouchableOpacity
+  const renderNoteCard = (note: Note, index: number) => (
+    <AnimatedPressable
       key={note.id}
+      entering={FadeInDown.delay(Math.min(index, 8) * 45).duration(320)}
+      haptic="selection"
       style={styles.card}
-      activeOpacity={0.7}
       onPress={() => router.push(`/note/${note.id}`)}
     >
       <View style={styles.cardHeader}>
-        <Text style={styles.cardTitle} numberOfLines={1}>
-          {note.pinned ? '📌 ' : ''}
-          {note.title}
-        </Text>
-        <TouchableOpacity onPress={() => handleOpenActions(note)} hitSlop={8}>
-          <Ionicons name="ellipsis-horizontal" size={20} color={colors.textMuted} />
-        </TouchableOpacity>
+        <View style={styles.cardTitleRow}>
+          {note.pinned && (
+            <View style={styles.pinBadge}>
+              <Ionicons name="bookmark" size={11} color={colors.tint} />
+            </View>
+          )}
+          <Text style={styles.cardTitle} numberOfLines={1}>
+            {note.title}
+          </Text>
+        </View>
+        <IconButton
+          name="ellipsis-horizontal"
+          size={16}
+          background={colors.surface}
+          onPress={() => handleOpenActions(note)}
+        />
       </View>
       <Text style={styles.cardSnippet} numberOfLines={2}>
         {note.transcription || 'No transcription text'}
       </Text>
       <View style={styles.cardMeta}>
-        <Text style={styles.metaText}>
-          {formatDuration(note.duration)} • {formatRelativeTime(note.createdAt)}
-        </Text>
+        <View style={styles.metaLeft}>
+          <Chip label={formatDuration(note.duration)} tone="muted" />
+          <Text style={styles.metaText}>{formatRelativeTime(note.createdAt)}</Text>
+        </View>
         {note.tags.length > 0 && (
           <View style={styles.tagRow}>
             {note.tags.slice(0, 2).map((tag) => (
-              <View key={tag} style={styles.tagChip}>
-                <Text style={styles.tagChipText}>{tag}</Text>
-              </View>
+              <Chip key={tag} label={tag} tone="tint" />
             ))}
             {note.tags.length > 2 && <Text style={styles.metaText}>+{note.tags.length - 2}</Text>}
           </View>
         )}
       </View>
-    </TouchableOpacity>
+    </AnimatedPressable>
   );
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle={colorScheme === 'dark' ? 'light-content' : 'dark-content'} />
 
-      <View style={styles.searchRow}>
-        <Ionicons name="search" size={18} color={colors.textMuted} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search notes"
-          placeholderTextColor={colors.textMuted}
+      <View style={styles.header}>
+        <ScreenHeader title="Notes" subtitle={`${notes.length} note${notes.length === 1 ? '' : 's'} saved`} />
+
+        <TextField
+          icon="search"
+          placeholder="Search notes, tags…"
           value={query}
           onChangeText={setQuery}
+          onClear={() => setQuery('')}
           autoCapitalize="none"
           autoCorrect={false}
+          containerStyle={styles.searchField}
         />
       </View>
 
       {loading ? (
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading notes…</Text>
+        <View style={styles.list}>
+          {Array.from({ length: 4 }).map((_, i) => (
+            <View key={i} style={styles.skeletonCard}>
+              <Skeleton width="55%" height={16} />
+              <Skeleton width="90%" height={12} style={{ marginTop: Spacing.md }} />
+              <Skeleton width="35%" height={12} style={{ marginTop: Spacing.sm }} />
+            </View>
+          ))}
         </View>
       ) : filteredNotes.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Ionicons name="document-text-outline" size={64} color={colors.textMuted} />
-          <Text style={styles.emptyStateTitle}>{query ? 'No matching notes' : 'No Notes Yet'}</Text>
-          <Text style={styles.emptyStateText}>
-            {query ? 'Try a different search term.' : 'Record and save your first note to see it here.'}
-          </Text>
-        </View>
+        <EmptyState
+          icon="document-text-outline"
+          title={query ? 'No matching notes' : 'No notes yet'}
+          subtitle={query ? 'Try a different search term.' : 'Record and save your first note to see it here.'}
+        />
       ) : (
-        <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.list}
+          showsVerticalScrollIndicator={false}
+        >
           {pinnedNotes.length > 0 && (
             <>
               <Text style={styles.sectionLabel}>Pinned</Text>
@@ -219,54 +240,54 @@ export default function NotesScreen() {
 function createStyles(colors: typeof Colors.light) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
-    searchRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: Spacing.sm,
-      marginHorizontal: Spacing.lg,
-      marginTop: Spacing.md,
-      marginBottom: Spacing.sm,
-      paddingHorizontal: Spacing.md,
-      paddingVertical: Spacing.sm,
-      backgroundColor: colors.surface,
-      borderRadius: 10,
-    },
-    searchInput: { flex: 1, color: colors.text, fontSize: FontSize.md },
-    loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    loadingText: { fontSize: FontSize.md, color: colors.textMuted },
-    list: { flex: 1, paddingHorizontal: Spacing.lg },
+    header: { paddingHorizontal: Spacing.xl, paddingTop: Spacing.lg },
+    searchField: { marginBottom: Spacing.lg },
+    scroll: { flex: 1 },
+    list: { paddingHorizontal: Spacing.xl, paddingBottom: 128 },
     sectionLabel: {
-      fontSize: FontSize.sm,
+      fontSize: FontSize.xs,
       fontWeight: '700',
       color: colors.textMuted,
       textTransform: 'uppercase',
+      letterSpacing: 0.6,
       marginBottom: Spacing.sm,
       marginTop: Spacing.xs,
     },
     card: {
       backgroundColor: colors.card,
-      borderRadius: 12,
-      padding: Spacing.md,
+      borderRadius: Radius.lg,
+      padding: Spacing.lg,
       marginBottom: Spacing.md,
-      borderWidth: 1,
-      borderColor: colors.border,
+      ...Shadow.sm,
+    },
+    skeletonCard: {
+      backgroundColor: colors.card,
+      borderRadius: Radius.lg,
+      padding: Spacing.lg,
+      marginBottom: Spacing.md,
+      ...Shadow.sm,
     },
     cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    cardTitle: { flex: 1, fontSize: FontSize.md, fontWeight: '600', color: colors.text, marginRight: Spacing.sm },
-    cardSnippet: { fontSize: FontSize.sm, color: colors.textMuted, marginTop: Spacing.xs, lineHeight: 20 },
-    cardMeta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: Spacing.sm },
+    cardTitleRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginRight: Spacing.sm },
+    pinBadge: {
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      backgroundColor: `${colors.tint}1A`,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    cardTitle: { flex: 1, fontSize: FontSize.md, fontWeight: '700', color: colors.text },
+    cardSnippet: { fontSize: FontSize.sm, color: colors.textMuted, marginTop: Spacing.sm, lineHeight: 20 },
+    cardMeta: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginTop: Spacing.md,
+      gap: Spacing.sm,
+    },
+    metaLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
     metaText: { fontSize: FontSize.sm, color: colors.textMuted },
     tagRow: { flexDirection: 'row', gap: Spacing.xs },
-    tagChip: { backgroundColor: colors.surface, borderRadius: 10, paddingHorizontal: Spacing.sm, paddingVertical: 2 },
-    tagChipText: { fontSize: 11, color: colors.tint, fontWeight: '600' },
-    emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing.xxl },
-    emptyStateTitle: {
-      fontSize: FontSize.lg,
-      fontWeight: '600',
-      color: colors.text,
-      marginTop: Spacing.lg,
-      marginBottom: Spacing.sm,
-    },
-    emptyStateText: { fontSize: FontSize.md, color: colors.textMuted, textAlign: 'center', lineHeight: 22 },
   });
 }

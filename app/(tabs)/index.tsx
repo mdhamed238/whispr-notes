@@ -4,10 +4,15 @@
  * file captured alongside the stream (for playback from the Notes screens).
  */
 
+import Button from '@/components/ui/Button';
+import Card from '@/components/ui/Card';
+import ScreenHeader from '@/components/ui/ScreenHeader';
+import Skeleton from '@/components/ui/Skeleton';
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { AUDIO_CONFIG, ERROR_MESSAGES, UI_CONFIG } from '@/constants/config';
 import { FontSize, Spacing } from '@/constants/Spacing';
+import { Radius, Shadow } from '@/constants/theme';
 import storageService from '@/services/storageService';
 import { computeDurationSeconds, encodeWavBase64 } from '@/services/wavEncoder';
 import { Note } from '@/types';
@@ -22,12 +27,25 @@ import {
   StatusBar,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { AudioManager, AudioRecorder } from 'react-native-audio-api';
 import { useSpeechToText, WHISPER_TINY_EN } from 'react-native-executorch';
+import Animated, {
+  Easing,
+  FadeIn,
+  FadeInDown,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withRepeat,
+  withSequence,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+import AnimatedPressable from '@/components/ui/AnimatedPressable';
 
 function buildAutoTitle(transcription: string): string {
   const trimmed = transcription.trim();
@@ -68,6 +86,20 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
   );
 
   const model = useSpeechToText({ model: WHISPER_TINY_EN });
+
+  // Bug fix: useSpeechToText rebuilds `streamInsert` (via useCallback keyed
+  // on `isReady`) every time readiness changes, and the rebuilt version
+  // throws ModuleNotLoaded if the `isReady` it closed over was false at
+  // creation time. The onAudioReady callback below is registered exactly
+  // once per session (see that effect's comment for why), so without this
+  // ref it would permanently call the very first render's streamInsert —
+  // captured while the model was still loading — meaning every audio
+  // buffer was silently dropped (caught by the try/catch below) and no
+  // transcription ever appeared. Keeping this ref current on every render
+  // and reading through it lets the one-time registration always reach the
+  // latest, ready-bound streamInsert.
+  const modelRef = useRef(model);
+  modelRef.current = model;
 
   // The installed react-native-audio-api has no file-output API, so we
   // accumulate the same raw PCM samples already streamed into the model
@@ -112,7 +144,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       try {
         const bufferArray = Array.from(buffer.getChannelData(0));
         samplesRef.current.push(...bufferArray);
-        model.streamInsert(bufferArray);
+        modelRef.current.streamInsert(bufferArray);
       } catch (error) {
         console.error('Audio buffer processing error:', error);
       }
@@ -245,12 +277,13 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       };
 
       await storageService.saveNote(note);
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
       onSessionReset();
       router.push('/notes');
     } catch (error) {
       console.error('Failed to save note:', error);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       Alert.alert('Error', 'Failed to save note');
       setIsSaving(false);
     }
@@ -274,57 +307,64 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
     onSessionReset();
   };
 
+  const downloadProgress = useSharedValue(0);
+  useEffect(() => {
+    downloadProgress.value = withTiming(model.downloadProgress, { duration: 300 });
+  }, [model.downloadProgress, downloadProgress]);
+  const progressBarStyle = useAnimatedStyle(() => ({
+    width: `${Math.min(downloadProgress.value, 1) * 100}%`,
+  }));
+
+  const hasTranscript = Boolean(model.committedTranscription || model.nonCommittedTranscription);
+
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle={colorScheme === 'dark' ? 'light-content' : 'dark-content'} />
 
       <View style={styles.content}>
-        <View style={styles.header}>
-          <Text style={styles.title}>Record</Text>
-          <Text style={styles.subtitle}>
-            {model.isReady
+        <ScreenHeader
+          title="Record"
+          subtitle={
+            model.isReady
               ? 'Ready to transcribe'
               : model.downloadProgress > 0
                 ? `Downloading model… ${Math.round(model.downloadProgress * 100)}%`
-                : 'Loading AI model…'}
-          </Text>
-        </View>
+                : 'Loading AI model…'
+          }
+        />
 
         {!model.isReady ? (
-          <View style={styles.loadingContainer}>
-            <Text style={styles.loadingText}>Loading Whisper model…</Text>
-            <Text style={styles.progressText}>{Math.round(model.downloadProgress * 100)}%</Text>
-            <View style={styles.progressBar}>
-              <View style={[styles.progressFill, { width: `${model.downloadProgress * 100}%` }]} />
-            </View>
-          </View>
+          <Animated.View entering={FadeIn.duration(300)} style={styles.loadingContainer}>
+            <Card style={styles.loadingCard} elevation="sm">
+              <Text style={styles.loadingText}>Loading Whisper model…</Text>
+              <Text style={styles.progressText}>{Math.round(model.downloadProgress * 100)}%</Text>
+              <View style={styles.progressTrack}>
+                <Animated.View style={[styles.progressFill, progressBarStyle]} />
+              </View>
+              <Skeleton width="88%" height={12} style={{ marginTop: Spacing.xl }} />
+              <Skeleton width="62%" height={12} style={{ marginTop: Spacing.sm }} />
+            </Card>
+          </Animated.View>
         ) : (
-          <>
+          <Animated.View entering={FadeInDown.duration(400)} style={{ flex: 1 }}>
             <View style={styles.recordButtonContainer}>
-              <TouchableOpacity
-                style={[styles.recordButton, model.isGenerating && styles.recordButtonRecording]}
-                onPress={model.isGenerating ? handleStopStreaming : handleStartStreaming}
+              <PulseRecordButton
+                isRecording={model.isGenerating}
                 disabled={!model.isReady || isSaving}
-                activeOpacity={0.8}
-              >
-                <Ionicons
-                  name={model.isGenerating ? 'stop' : 'mic'}
-                  size={56}
-                  color={model.isGenerating ? colors.onAccent : colors.danger}
-                />
-              </TouchableOpacity>
+                onPress={model.isGenerating ? handleStopStreaming : handleStartStreaming}
+                colors={colors}
+              />
               <Text style={styles.recordButtonText}>
-                {model.isGenerating ? 'Stop Recording' : 'Start Recording'}
+                {model.isGenerating ? 'Recording…' : 'Tap to start recording'}
               </Text>
+              {model.isGenerating && <Waveform colors={colors} />}
             </View>
 
-            <View style={styles.transcriptionContainer}>
-              <Text style={styles.transcriptionLabel}>
-                {model.isGenerating ? 'Listening…' : 'Transcription'}
-              </Text>
+            <Card style={styles.transcriptionCard} elevation="sm">
+              <Text style={styles.transcriptionLabel}>{model.isGenerating ? 'Listening…' : 'Transcription'}</Text>
 
-              <ScrollView style={styles.transcriptionScroll}>
-                {model.committedTranscription || model.nonCommittedTranscription ? (
+              <ScrollView style={styles.transcriptionScroll} showsVerticalScrollIndicator={false}>
+                {hasTranscript ? (
                   <Text style={styles.transcriptionText}>
                     <Text style={styles.committedText}>{model.committedTranscription}</Text>
                     {model.nonCommittedTranscription && (
@@ -338,107 +378,203 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
                 )}
               </ScrollView>
 
-              {(model.committedTranscription || model.nonCommittedTranscription) && !model.isGenerating && (
+              {hasTranscript && !model.isGenerating && (
                 <View style={styles.actionButtons}>
-                  <TouchableOpacity
-                    style={styles.saveButton}
+                  <Button
+                    label={isSaving ? 'Saving…' : isCapturingAudio ? 'Processing audio…' : 'Save'}
+                    icon="checkmark-circle"
+                    variant="primary"
+                    loading={isSaving}
+                    disabled={isSaving || isCapturingAudio}
                     onPress={handleSaveTranscription}
+                    haptic="none"
+                    style={styles.saveButton}
+                  />
+                  <Button
+                    label="Reset"
+                    icon="refresh"
+                    variant="secondary"
                     disabled={isSaving || isCapturingAudio}
-                  >
-                    <Ionicons name="save" size={20} color={colors.onAccent} />
-                    <Text style={styles.saveButtonText}>
-                      {isSaving ? 'Saving…' : isCapturingAudio ? 'Processing audio…' : 'Save'}
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.resetButton}
                     onPress={handleReset}
-                    disabled={isSaving || isCapturingAudio}
-                  >
-                    <Ionicons name="refresh" size={20} color={colors.textMuted} />
-                    <Text style={styles.resetButtonText}>Reset</Text>
-                  </TouchableOpacity>
+                    style={styles.resetButton}
+                  />
                 </View>
               )}
-            </View>
-          </>
+            </Card>
+          </Animated.View>
         )}
       </View>
     </SafeAreaView>
   );
 }
 
+const RECORD_SIZE = 128;
+
+function PulseRecordButton({
+  isRecording,
+  disabled,
+  onPress,
+  colors,
+}: {
+  isRecording: boolean;
+  disabled?: boolean;
+  onPress: () => void;
+  colors: typeof Colors.light;
+}) {
+  const ring1 = useSharedValue(0);
+  const ring2 = useSharedValue(0);
+
+  useEffect(() => {
+    if (isRecording) {
+      ring1.value = 0;
+      ring2.value = 0;
+      ring1.value = withRepeat(withTiming(1, { duration: 1600, easing: Easing.out(Easing.ease) }), -1, false);
+      ring2.value = withDelay(
+        800,
+        withRepeat(withTiming(1, { duration: 1600, easing: Easing.out(Easing.ease) }), -1, false)
+      );
+    } else {
+      ring1.value = withTiming(0, { duration: 200 });
+      ring2.value = withTiming(0, { duration: 200 });
+    }
+  }, [isRecording, ring1, ring2]);
+
+  const ring1Style = useAnimatedStyle(() => ({
+    opacity: (1 - ring1.value) * 0.35,
+    transform: [{ scale: 1 + ring1.value * 0.7 }],
+  }));
+  const ring2Style = useAnimatedStyle(() => ({
+    opacity: (1 - ring2.value) * 0.35,
+    transform: [{ scale: 1 + ring2.value * 0.7 }],
+  }));
+
+  return (
+    <View style={pulseStyles.wrap}>
+      <Animated.View
+        pointerEvents="none"
+        style={[pulseStyles.ring, { backgroundColor: colors.danger }, ring1Style]}
+      />
+      <Animated.View
+        pointerEvents="none"
+        style={[pulseStyles.ring, { backgroundColor: colors.danger }, ring2Style]}
+      />
+      <AnimatedPressable
+        disabled={disabled}
+        scaleTo={0.94}
+        haptic="none"
+        onPress={onPress}
+        style={[
+          pulseStyles.button,
+          {
+            backgroundColor: isRecording ? colors.danger : colors.card,
+            borderColor: isRecording ? colors.danger : colors.border,
+          },
+        ]}
+      >
+        <Ionicons name={isRecording ? 'stop' : 'mic'} size={44} color={isRecording ? colors.onAccent : colors.danger} />
+      </AnimatedPressable>
+    </View>
+  );
+}
+
+const pulseStyles = StyleSheet.create({
+  wrap: {
+    width: RECORD_SIZE + 40,
+    height: RECORD_SIZE + 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ring: {
+    position: 'absolute',
+    width: RECORD_SIZE,
+    height: RECORD_SIZE,
+    borderRadius: RECORD_SIZE / 2,
+  },
+  button: {
+    width: RECORD_SIZE,
+    height: RECORD_SIZE,
+    borderRadius: RECORD_SIZE / 2,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Shadow.md,
+  },
+});
+
+const WAVE_BAR_COUNT = 5;
+
+function Waveform({ colors }: { colors: typeof Colors.light }) {
+  return (
+    <View style={waveStyles.row}>
+      {Array.from({ length: WAVE_BAR_COUNT }).map((_, i) => (
+        <WaveBar key={i} index={i} colors={colors} />
+      ))}
+    </View>
+  );
+}
+
+function WaveBar({ index, colors }: { index: number; colors: typeof Colors.light }) {
+  const height = useSharedValue(8);
+
+  useEffect(() => {
+    const target = 14 + ((index * 7) % 18);
+    height.value = withDelay(
+      index * 90,
+      withRepeat(withSequence(withTiming(target, { duration: 380 }), withTiming(8, { duration: 380 })), -1, true)
+    );
+  }, [height, index]);
+
+  const style = useAnimatedStyle(() => ({ height: height.value }));
+
+  return <Animated.View style={[waveStyles.bar, { backgroundColor: colors.tint }, style]} />;
+}
+
+const waveStyles = StyleSheet.create({
+  row: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, height: 32, marginTop: Spacing.md },
+  bar: { width: 5, borderRadius: 3 },
+});
+
 function createStyles(colors: typeof Colors.light) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
-    content: { flex: 1, paddingHorizontal: Spacing.xl, paddingVertical: Spacing.xl },
-    header: { alignItems: 'center', marginBottom: Spacing.xxl },
-    title: { fontSize: FontSize.xl, fontWeight: 'bold', color: colors.text, marginBottom: Spacing.xs },
-    subtitle: { fontSize: FontSize.md, color: colors.textMuted, textAlign: 'center' },
-    loadingContainer: { alignItems: 'center', justifyContent: 'center', flex: 1 },
-    loadingText: { fontSize: FontSize.lg, fontWeight: '600', color: colors.text, marginBottom: Spacing.lg },
-    progressText: { fontSize: FontSize.xl, fontWeight: 'bold', color: colors.tint, marginBottom: Spacing.lg },
-    progressBar: { width: '80%', height: 8, backgroundColor: colors.surface, borderRadius: 4 },
-    progressFill: { height: '100%', backgroundColor: colors.tint, borderRadius: 4 },
-    recordButtonContainer: { alignItems: 'center', marginBottom: Spacing.xxl },
-    recordButton: {
-      width: 120,
-      height: 120,
-      borderRadius: 60,
-      backgroundColor: colors.background,
-      borderWidth: 4,
-      borderColor: colors.danger,
-      justifyContent: 'center',
-      alignItems: 'center',
-      elevation: 8,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.15,
-      shadowRadius: 8,
-      marginBottom: Spacing.md,
+    content: { flex: 1, paddingHorizontal: Spacing.xl, paddingTop: Spacing.lg, paddingBottom: 128 },
+    loadingContainer: { flex: 1, justifyContent: 'center' },
+    loadingCard: { alignItems: 'center', paddingVertical: Spacing.xxl },
+    loadingText: { fontSize: FontSize.lg, fontWeight: '700', color: colors.text, marginBottom: Spacing.sm },
+    progressText: { fontSize: FontSize.xxl, fontWeight: '800', color: colors.tint, marginBottom: Spacing.lg },
+    progressTrack: {
+      width: '100%',
+      height: 8,
+      backgroundColor: colors.surface,
+      borderRadius: Radius.pill,
+      overflow: 'hidden',
     },
-    recordButtonRecording: { backgroundColor: colors.danger, borderColor: colors.danger },
-    recordButtonText: { fontSize: FontSize.md, fontWeight: '600', color: colors.text },
-    transcriptionContainer: { backgroundColor: colors.surface, padding: Spacing.lg, borderRadius: 12, flex: 1 },
+    progressFill: { height: '100%', backgroundColor: colors.tint, borderRadius: Radius.pill },
+    recordButtonContainer: { alignItems: 'center', marginBottom: Spacing.xl },
+    recordButtonText: { fontSize: FontSize.md, fontWeight: '600', color: colors.textMuted, marginTop: Spacing.sm },
+    transcriptionCard: { flex: 1 },
     transcriptionLabel: {
-      fontSize: FontSize.md,
-      fontWeight: '600',
-      color: colors.text,
+      fontSize: FontSize.sm,
+      fontWeight: '700',
+      color: colors.textMuted,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
       marginBottom: Spacing.md,
       textAlign: 'center',
     },
     transcriptionScroll: { flex: 1 },
-    transcriptionText: { fontSize: FontSize.lg, lineHeight: 26 },
+    transcriptionText: { fontSize: FontSize.lg, lineHeight: 27 },
     committedText: { color: colors.text, fontWeight: '600' },
     nonCommittedText: { color: colors.textMuted, fontStyle: 'italic' },
-    waitingText: { fontSize: FontSize.md, color: colors.textMuted, textAlign: 'center', fontStyle: 'italic' },
-    actionButtons: { flexDirection: 'row', justifyContent: 'space-around', marginTop: Spacing.lg },
-    saveButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: colors.success,
-      paddingVertical: Spacing.md,
-      paddingHorizontal: Spacing.lg,
-      borderRadius: 8,
-      flex: 1,
-      marginRight: Spacing.sm,
+    waitingText: {
+      fontSize: FontSize.md,
+      color: colors.textMuted,
+      textAlign: 'center',
+      fontStyle: 'italic',
+      paddingVertical: Spacing.xl,
     },
-    saveButtonText: { color: colors.onAccent, fontSize: FontSize.md, fontWeight: '600', marginLeft: Spacing.sm },
-    resetButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: colors.card,
-      borderWidth: 1,
-      borderColor: colors.border,
-      paddingVertical: Spacing.md,
-      paddingHorizontal: Spacing.lg,
-      borderRadius: 8,
-      flex: 1,
-      marginLeft: Spacing.sm,
-    },
-    resetButtonText: { color: colors.textMuted, fontSize: FontSize.md, fontWeight: '600', marginLeft: Spacing.sm },
+    actionButtons: { flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.lg },
+    saveButton: { flex: 1 },
+    resetButton: { flex: 1 },
   });
 }
