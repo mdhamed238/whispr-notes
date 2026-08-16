@@ -2,6 +2,13 @@
 
 An Expo / React Native app that records speech and transcribes it **on-device** in real time using OpenAI's Whisper (Base, English) via [`react-native-executorch`](https://github.com/software-mansion/react-native-executorch). No audio ever leaves the phone.
 
+## Screenshots
+
+| Record | Notes | First launch |
+|:---:|:---:|:---:|
+| <img src="docs/screenshots/record.webp" alt="Record screen, ready to transcribe" width="240"> | <img src="docs/screenshots/notes.webp" alt="Notes screen with search" width="240"> | <img src="docs/screenshots/loading.webp" alt="Whisper model downloading on first launch" width="240"> |
+| Tap to record — live transcript below | Search notes by title, text, or tag | Models download once, then cached |
+
 ## Features
 
 - **Live streaming transcription** — audio is captured in 100 ms chunks and streamed straight into the Whisper model as you speak, with committed and in-progress (interim) text shown separately. The transcript auto-scrolls as text arrives, unless you've scrolled up to read back.
