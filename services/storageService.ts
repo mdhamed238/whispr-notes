@@ -8,15 +8,36 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { EXPORT_FORMATS, STORAGE_KEYS, UI_CONFIG } from '../constants/config';
-import { ExportOptions, Note, StorageServiceInterface } from '../types';
+import { ExportOptions, Note, StorageServiceInterface, TranscriptSegment } from '../types';
+import { deleteTimeline, loadTimeline } from './timelineStore';
 
 function formatSrtTimestamp(totalSeconds: number): string {
-  const wholeSeconds = Math.max(0, Math.floor(totalSeconds));
-  const hours = Math.floor(wholeSeconds / 3600);
-  const minutes = Math.floor((wholeSeconds % 3600) / 60);
-  const seconds = wholeSeconds % 60;
+  const safeSeconds = Math.max(0, Number.isFinite(totalSeconds) ? totalSeconds : 0);
+  // Milliseconds are truncated rather than rounded: rounding up at .9995
+  // could push a cue's start past its own end on a very short word.
+  const totalMs = Math.floor(safeSeconds * 1000);
+  const hours = Math.floor(totalMs / 3600000);
+  const minutes = Math.floor((totalMs % 3600000) / 60000);
+  const seconds = Math.floor((totalMs % 60000) / 1000);
+  const milliseconds = totalMs % 1000;
   const pad = (n: number) => n.toString().padStart(2, '0');
-  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)},000`;
+  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)},${milliseconds
+    .toString()
+    .padStart(3, '0')}`;
+}
+
+/**
+ * Keeps only segments that can produce a valid cue, in playable order.
+ *
+ * Segments arrive from the model, so this guards the export against a
+ * degenerate timeline (zero-length spans, out-of-order starts) rather than
+ * writing an .srt that players reject.
+ */
+function usableSegments(segments: TranscriptSegment[] | undefined): TranscriptSegment[] {
+  if (!segments || segments.length === 0) return [];
+  return segments
+    .filter((segment) => segment.text.trim().length > 0 && segment.end > segment.start)
+    .sort((a, b) => a.start - b.start);
 }
 
 class StorageService implements StorageServiceInterface {
@@ -116,6 +137,8 @@ class StorageService implements StorageServiceInterface {
 
       await AsyncStorage.setItem(STORAGE_KEYS.TRANSCRIPTIONS, JSON.stringify(remaining));
 
+      deleteTimeline(id);
+
       if (note?.audioUri) {
         try {
           const fileInfo = await FileSystem.getInfoAsync(note.audioUri);
@@ -145,15 +168,19 @@ class StorageService implements StorageServiceInterface {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const fileName = `note-${timestamp}`;
 
+      // Only the formats that can carry timings pay for reading the sidecar.
+      const segments =
+        options.format === EXPORT_FORMATS.TXT ? null : await loadTimeline(note.id);
+
       switch (options.format) {
         case EXPORT_FORMATS.TXT:
           content = this.generateTextExport(note, options);
           break;
         case EXPORT_FORMATS.JSON:
-          content = this.generateJsonExport(note, options);
+          content = this.generateJsonExport(note, options, segments);
           break;
         case EXPORT_FORMATS.SRT:
-          content = this.generateSrtExport(note);
+          content = this.generateSrtExport(note, segments);
           break;
         default:
           throw new Error('Unsupported export format');
@@ -206,7 +233,11 @@ class StorageService implements StorageServiceInterface {
     return content;
   }
 
-  private generateJsonExport(note: Note, options: ExportOptions): string {
+  private generateJsonExport(
+    note: Note,
+    options: ExportOptions,
+    segments: TranscriptSegment[] | null
+  ): string {
     const exportData: any = {
       title: note.title,
       transcription: note.transcription,
@@ -218,18 +249,33 @@ class StorageService implements StorageServiceInterface {
       exportData.id = note.id;
       exportData.tags = note.tags;
       exportData.pinned = note.pinned;
+      if (segments && segments.length > 0) {
+        exportData.segments = segments;
+      }
     }
 
     return JSON.stringify(exportData, null, 2);
   }
 
-  private generateSrtExport(note: Note): string {
-    // Bug fix: the old version did `duration.toString().padStart(2, '0')`
-    // straight into the seconds field with no minutes/hours math, producing
-    // invalid timestamps like "00:00:125,000" for anything over 59s.
-    const startTime = '00:00:00,000';
-    const endTime = formatSrtTimestamp(note.duration);
-    return `1\n${startTime} --> ${endTime}\n${note.transcription}\n\n`;
+  private generateSrtExport(note: Note, timeline: TranscriptSegment[] | null): string {
+    const segments = usableSegments(timeline ?? undefined);
+
+    // Fallback for notes with no timeline: one cue spanning the recording.
+    // Not a real subtitle track, but it is the honest representation of what
+    // is known about a note whose timestamp pass never ran or failed.
+    if (segments.length === 0) {
+      const startTime = '00:00:00,000';
+      const endTime = formatSrtTimestamp(note.duration);
+      return `1\n${startTime} --> ${endTime}\n${note.transcription}\n\n`;
+    }
+
+    return segments
+      .map((segment, index) => {
+        const startTime = formatSrtTimestamp(segment.start);
+        const endTime = formatSrtTimestamp(segment.end);
+        return `${index + 1}\n${startTime} --> ${endTime}\n${segment.text.trim()}\n`;
+      })
+      .join('\n');
   }
 }
 

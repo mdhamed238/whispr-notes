@@ -2,8 +2,8 @@
  * Custom floating pill tab bar for the (tabs) navigator: a dark rounded
  * dock with a spring-animated bubble sliding behind the active icon.
  */
-import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import * as Haptics from 'expo-haptics';
+import { Tabs } from 'expo-router';
 import React, { useEffect } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
@@ -12,6 +12,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { Radius, Shadow } from '@/constants/theme';
+
+/**
+ * expo-router ships its own bottom-tabs types, which are structurally
+ * incompatible with the standalone `@react-navigation/bottom-tabs` ones
+ * (their header option types disagree on `ColorValue` vs `string`). Deriving
+ * the props from the `Tabs` component we actually render keeps this in step
+ * with whatever expo-router expects, and avoids depending on a package the
+ * app doesn't otherwise use.
+ */
+type BottomTabBarProps = Parameters<NonNullable<React.ComponentProps<typeof Tabs>['tabBar']>>[0];
 
 const ITEM_SIZE = 60;
 const BUBBLE_SIZE = 44;

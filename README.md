@@ -28,6 +28,7 @@ This app **must run on a physical iOS or Android device** — simulators/emulato
 | | |
 |---|---|
 | Node.js | 18+ |
+| Package manager | Yarn — `yarn.lock` is the committed lockfile |
 | iOS | Physical device, iOS 17+ |
 | Android | Physical device, Android 7.0+ (API 24), **arm64-v8a required** |
 | Free storage | ~600 MB (models are downloaded at runtime, not bundled) |
@@ -37,16 +38,20 @@ This app **must run on a physical iOS or Android device** — simulators/emulato
 
 On-device model inference (`react-native-executorch`) and real-time audio capture (`react-native-audio-api`) both need native hardware, so this is a [dev client](https://docs.expo.dev/develop/development-builds/introduction/) build, not Expo Go.
 
+> **Native modules are pinned to exact versions on purpose** (`react-native-executorch`, `react-native-audio-api`, `react-native-worklets`, and the executorch resource fetcher). A floating `^` range lets the JS tree drift away from whatever native code the dev client was compiled with, which surfaces as *"package doesn't seem to be linked"* or *"Mismatch between JavaScript part and native part"*. **After any native dependency change, rebuild the dev client** — a JS reload is not enough.
+>
+> **Transcription imports come from `react-native-executorch/legacy`, deliberately.** executorch 0.10 reorganised its public API, and the new root entry point returns plain strings from `transcribe()`/`stream()` with no `verbose` option — no segments, no word timestamps. Note timelines (tap-a-word playback, multi-cue SRT) depend on those, so the app stays on the legacy entry point until the new API exposes timings. The same applies to `react-native-executorch-expo-resource-fetcher/legacy`.
+
 ## Getting Started
 
 ```bash
 git clone https://github.com/mdhamed238/audio-transcription-app.git
 cd audio-transcription-app
-npm install
+yarn install
 
 # build & run a development client on a connected device
-npm run ios      # iOS device
-npm run android   # Android device
+yarn ios       # iOS device
+yarn android   # Android device
 ```
 
 On first launch the models download and initialize — Whisper Base EN is ~380 MB and the VAD ~2 MB, so give it a minute on a slow connection. This happens once; they're cached on disk afterwards.
@@ -88,7 +93,7 @@ types/
 
 ## Tech Stack
 
-- [Expo SDK 54](https://expo.dev) / React Native 0.81 / React 19
+- [Expo SDK 57](https://expo.dev) / React Native 0.86 / React 19
 - [expo-router](https://docs.expo.dev/router/introduction/) for file-based navigation
 - [`react-native-executorch`](https://github.com/software-mansion/react-native-executorch) — on-device Whisper Base (EN) inference + FSMN voice-activity detection
 - [`react-native-audio-api`](https://github.com/software-mansion/react-native-audio-api) — low-level streaming audio capture

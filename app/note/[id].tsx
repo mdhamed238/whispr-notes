@@ -13,18 +13,22 @@ import Colors from '@/constants/Colors';
 import { FontSize, Spacing } from '@/constants/Spacing';
 import { Radius } from '@/constants/theme';
 import storageService from '@/services/storageService';
-import { Note } from '@/types';
+import { deleteTimeline, loadTimeline } from '@/services/timelineStore';
+import { Note, TranscriptSegment, TranscriptWord } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
-import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
+import { useAudioPlayer, useAudioPlayerStatus, type AudioPlayer } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const AUTOSAVE_DELAY_MS = 800;
 const WAVE_BAR_COUNT = 32;
+// The player's own default is 500ms, which is too coarse to track a spoken
+// word — highlighting visibly lags the audio at that rate.
+const PLAYBACK_UPDATE_INTERVAL_MS = 100;
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
@@ -48,6 +52,19 @@ export default function NoteDetailScreen() {
   const [tags, setTags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState('');
   const [pinned, setPinned] = useState(false);
+  const [mode, setMode] = useState<'listen' | 'edit'>('listen');
+
+  // Hoisted out of NotePlayer so the timestamped transcript below can drive
+  // the same player. The hook re-creates the player when the source changes,
+  // so passing null before the note has loaded is fine.
+  const player = useAudioPlayer(note?.audioUri ?? null, {
+    updateInterval: PLAYBACK_UPDATE_INTERVAL_MS,
+  });
+
+  // Loaded from its sidecar file rather than read off the note — see
+  // services/timelineStore.ts. Null is the ordinary case.
+  const [timeline, setTimeline] = useState<TranscriptSegment[] | null>(null);
+  const hasTimeline = Boolean(note?.audioUri && timeline && timeline.length > 0);
 
   // Bug fix: the title and transcript fields used to share one debounce
   // timer keyed to whichever field changed last — editing the title, then
@@ -66,8 +83,10 @@ export default function NoteDetailScreen() {
     (async () => {
       const notes = await storageService.getNotes();
       const found = notes.find((n) => n.id === id) ?? null;
+      const segments = found?.audioUri ? await loadTimeline(found.id) : null;
       if (!cancelled) {
         setNote(found);
+        setTimeline(segments);
         if (found) {
           setTitle(found.title);
           setTranscription(found.transcription);
@@ -137,6 +156,16 @@ export default function NoteDetailScreen() {
 
   const handleTranscriptionChange = (text: string) => {
     setTranscription(text);
+    // A timeline describes the audio, not the text. Once the transcript has
+    // been edited by hand the two no longer agree, and re-aligning them
+    // would mean re-running the model, which would only reproduce the words
+    // just corrected. Dropping the timings is the only option that never
+    // shows stale text; SRT export falls back to a single cue, which is the
+    // honest representation of what is still known.
+    if (timeline) {
+      setTimeline(null);
+      deleteTimeline(id);
+    }
     scheduleAutosave();
   };
 
@@ -237,12 +266,22 @@ export default function NoteDetailScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.topBar}>
         <IconButton name="chevron-down" onPress={() => router.back()} background={colors.surface} />
-        <IconButton
-          name={pinned ? 'bookmark' : 'bookmark-outline'}
-          color={colors.tint}
-          background={pinned ? `${colors.tint}1A` : colors.surface}
-          onPress={handleTogglePin}
-        />
+        <View style={styles.topBarActions}>
+          {hasTimeline && (
+            <IconButton
+              name={mode === 'listen' ? 'create-outline' : 'headset-outline'}
+              color={colors.tint}
+              background={colors.surface}
+              onPress={() => setMode((current) => (current === 'listen' ? 'edit' : 'listen'))}
+            />
+          )}
+          <IconButton
+            name={pinned ? 'bookmark' : 'bookmark-outline'}
+            color={colors.tint}
+            background={pinned ? `${colors.tint}1A` : colors.surface}
+            onPress={handleTogglePin}
+          />
+        </View>
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
@@ -265,7 +304,7 @@ export default function NoteDetailScreen() {
             })}
           </Text>
 
-          {note.audioUri && <NotePlayer uri={note.audioUri} colors={colors} />}
+          {note.audioUri && <NotePlayer player={player} colors={colors} />}
 
           <View style={styles.tagSection}>
             {tags.length > 0 && (
@@ -290,13 +329,17 @@ export default function NoteDetailScreen() {
             </View>
           </View>
 
-          <TextInput
-            style={styles.transcriptionInput}
-            value={transcription}
-            onChangeText={handleTranscriptionChange}
-            multiline
-            textAlignVertical="top"
-          />
+          {hasTimeline && mode === 'listen' && timeline ? (
+            <TimelineTranscript player={player} segments={timeline} colors={colors} styles={styles} />
+          ) : (
+            <TextInput
+              style={styles.transcriptionInput}
+              value={transcription}
+              onChangeText={handleTranscriptionChange}
+              multiline
+              textAlignVertical="top"
+            />
+          )}
         </Animated.View>
       </ScrollView>
 
@@ -314,8 +357,87 @@ export default function NoteDetailScreen() {
   );
 }
 
-function NotePlayer({ uri, colors }: { uri: string; colors: typeof Colors.light }) {
-  const player = useAudioPlayer(uri);
+/**
+ * Flattens a timeline into a single ordered list of seek targets.
+ *
+ * Word-level detail is optional even with `verbose` on, so a segment that
+ * arrives without `words` still contributes itself — a coarser target is
+ * better than a gap the user can't tap.
+ */
+function flattenWords(segments: TranscriptSegment[]): TranscriptWord[] {
+  const words: TranscriptWord[] = [];
+
+  for (const segment of segments) {
+    if (segment.words && segment.words.length > 0) {
+      words.push(...segment.words);
+    } else if (segment.text.trim().length > 0) {
+      words.push({ word: segment.text.trim(), start: segment.start, end: segment.end });
+    }
+  }
+
+  return words.sort((a, b) => a.start - b.start);
+}
+
+/**
+ * The transcript as a set of tappable seek targets, with the word currently
+ * being spoken highlighted.
+ *
+ * Subscribes to the player itself rather than taking `currentTime` as a
+ * prop: playback status updates several times a second, and routing that
+ * through the screen would re-render the title field, tags and export bar on
+ * every tick.
+ */
+function TimelineTranscript({
+  player,
+  segments,
+  colors,
+  styles,
+}: {
+  player: AudioPlayer;
+  segments: TranscriptSegment[];
+  colors: typeof Colors.light;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  const status = useAudioPlayerStatus(player);
+  const words = useMemo(() => flattenWords(segments), [segments]);
+
+  const activeIndex = useMemo(
+    () => words.findIndex((word) => status.currentTime >= word.start && status.currentTime < word.end),
+    [words, status.currentTime]
+  );
+
+  const handleWordPress = useCallback(
+    (word: TranscriptWord) => {
+      player.seekTo(word.start);
+      if (!status.playing) {
+        player.play();
+      }
+      Haptics.selectionAsync();
+    },
+    [player, status.playing]
+  );
+
+  return (
+    <View>
+      <Text style={styles.timelineHint}>Tap any word to jump to it</Text>
+      <Text style={styles.transcriptionInput}>
+        {words.map((word, index) => (
+          <React.Fragment key={`${index}-${word.start}`}>
+            {index > 0 ? ' ' : ''}
+            <Text
+              onPress={() => handleWordPress(word)}
+              style={index === activeIndex ? styles.activeWord : undefined}
+            >
+              {word.word.trim()}
+            </Text>
+          </React.Fragment>
+        ))}
+      </Text>
+    </View>
+  );
+}
+
+function NotePlayer({ player, colors }: { player: AudioPlayer; colors: typeof Colors.light }) {
   const status = useAudioPlayerStatus(player);
   // useAudioPlayerStatus re-renders this component on every playback tick,
   // so building the stylesheet inline here re-ran StyleSheet.create several
@@ -427,6 +549,20 @@ function createStyles(colors: typeof Colors.light) {
       paddingVertical: Spacing.sm,
       color: colors.text,
       fontSize: FontSize.md,
+    },
+    topBarActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+    timelineHint: {
+      fontSize: FontSize.xs,
+      color: colors.textMuted,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
+      fontWeight: '700',
+      marginBottom: Spacing.sm,
+    },
+    activeWord: {
+      color: colors.tint,
+      fontWeight: '700',
+      backgroundColor: `${colors.tint}1A`,
     },
     transcriptionInput: {
       fontSize: FontSize.md,
