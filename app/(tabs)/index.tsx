@@ -11,10 +11,18 @@ import ScreenHeader from '@/components/ui/ScreenHeader';
 import Skeleton from '@/components/ui/Skeleton';
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
-import { AUDIO_CONFIG, ERROR_MESSAGES, UI_CONFIG } from '@/constants/config';
+import {
+  AUDIO_CONFIG,
+  ERROR_MESSAGES,
+  STREAMING_CONFIG,
+  TIMELINE_CONFIG,
+  UI_CONFIG,
+} from '@/constants/config';
 import { FontSize, Spacing } from '@/constants/Spacing';
 import { Radius, Shadow } from '@/constants/theme';
 import storageService from '@/services/storageService';
+import { saveTimeline } from '@/services/timelineStore';
+import { buildTimeline } from '@/services/transcriptionTimeline';
 import { WavFileWriter } from '@/services/wavEncoder';
 import { Note } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
@@ -35,7 +43,10 @@ import {
   View,
 } from 'react-native';
 import { AudioManager, AudioRecorder } from 'react-native-audio-api';
-import { models, useSpeechToText } from 'react-native-executorch';
+// `/legacy` on purpose: executorch 0.10's new root API returns plain strings
+// from transcribe()/stream() with no `verbose` option, so segment and word
+// timestamps — which the note timeline is built on — are only available here.
+import { models, useSpeechToText } from 'react-native-executorch/legacy';
 import Animated, {
   Easing,
   FadeIn,
@@ -56,6 +67,11 @@ import AnimatedPressable from '@/components/ui/AnimatedPressable';
 // keep auto-scrolling. Scrolling up past this parks the view so the user
 // can read back through a long transcript without being yanked down.
 const AUTOSCROLL_STICK_THRESHOLD = 32;
+
+// Length of each captured audio buffer. This is how often audio crosses the
+// JS bridge — it is NOT how often the model runs; that is
+// STREAMING_CONFIG.INFERENCE_TIMEOUT_MS.
+const CAPTURE_BUFFER_SECONDS = 0.1;
 
 function buildAutoTitle(transcription: string): string {
   const trimmed = transcription.trim();
@@ -100,13 +116,10 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
 
-  const [recorder] = useState(
-    () =>
-      new AudioRecorder({
-        sampleRate: AUDIO_CONFIG.sampleRate,
-        bufferLengthInSamples: AUDIO_CONFIG.sampleRate * 0.1,
-      })
-  );
+  // react-native-audio-api 0.13 moved buffer configuration off the
+  // constructor and onto onAudioReady, so the recorder itself is now
+  // parameterless and the capture format is declared at registration below.
+  const [recorder] = useState(() => new AudioRecorder());
 
   // VAD-gated streaming (added in v0.9.0) commits text once a short silence
   // is detected instead of endlessly re-transcribing a growing buffer on
@@ -170,6 +183,20 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
   // which flips true the instant streamStop() runs — tapping Save in that
   // window could save a note out from under the real recording.
   const [isCapturingAudio, setIsCapturingAudio] = useState(false);
+  // The post-save timestamp pass (see services/transcriptionTimeline.ts).
+  // Held in a ref because two other paths must not run while it is in
+  // flight: starting a new recording (transcribe() and stream() would
+  // contend for the same model instance) and the session remount that
+  // Save schedules (which would tear the model down mid-inference).
+  const timelinePassRef = useRef<Promise<void> | null>(null);
+  const [isFinishingTimeline, setIsFinishingTimeline] = useState(false);
+
+  // useSpeechToText raises `isGenerating` for transcribe() as well as
+  // stream(), so during the post-save timeline pass the model reports itself
+  // as generating even though nothing is being recorded. Without this the
+  // record button would show its stop state and tapping it would call
+  // handleStopStreaming against an inference that isn't a recording.
+  const isRecording = model.isGenerating && !isFinishingTimeline;
 
   // Runaway guard: force-stops a recording left running by accident.
   const maxDurationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -198,24 +225,40 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
     AudioManager.setAudioSessionOptions({
       iosCategory: 'playAndRecord',
       iosMode: 'spokenAudio',
-      iosOptions: ['allowBluetooth', 'defaultToSpeaker'],
+      // Renamed in react-native-audio-api 0.13 (was 'allowBluetooth').
+      iosOptions: ['allowBluetoothHFP', 'defaultToSpeaker'],
     });
 
-    recorder.onAudioReady(({ buffer }) => {
-      try {
-        const channelData = buffer.getChannelData(0);
-        modelRef.current.streamInsert(channelData);
-        writerRef.current?.write(channelData);
+    const registration = recorder.onAudioReady(
+      {
+        sampleRate: AUDIO_CONFIG.sampleRate,
+        bufferLength: AUDIO_CONFIG.sampleRate * CAPTURE_BUFFER_SECONDS,
+        channelCount: AUDIO_CONFIG.numberOfChannels,
+      },
+      ({ buffer }) => {
+        try {
+          const channelData = buffer.getChannelData(0);
+          modelRef.current.streamInsert(channelData);
+          writerRef.current?.write(channelData);
 
-        let sumSquares = 0;
-        for (let i = 0; i < channelData.length; i++) {
-          sumSquares += channelData[i] * channelData[i];
+          let sumSquares = 0;
+          for (let i = 0; i < channelData.length; i++) {
+            sumSquares += channelData[i] * channelData[i];
+          }
+          audioLevel.value = Math.sqrt(sumSquares / channelData.length);
+        } catch (error) {
+          console.error('Audio buffer processing error:', error);
         }
-        audioLevel.value = Math.sqrt(sumSquares / channelData.length);
-      } catch (error) {
-        console.error('Audio buffer processing error:', error);
       }
-    });
+    );
+
+    // 0.13 reports registration failures through a Result rather than
+    // throwing, so a silent failure here would look exactly like a dead
+    // microphone — surface it instead.
+    if (registration.status === 'error') {
+      console.error('Failed to register audio callback:', registration.message);
+    }
+
     // Registered once per session (see the remount-key comment above), not
     // re-registered on every Start press.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -231,6 +274,13 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
         return;
       }
 
+      // A timeline pass from the previous note may still hold the model.
+      // It is short and already running, so waiting is preferable to
+      // starting a stream that would contend with it.
+      if (timelinePassRef.current) {
+        await timelinePassRef.current;
+      }
+
       transcriptRef.current = { committed: '', nonCommitted: '' };
       setTranscript({ committed: '', nonCommitted: '' });
       stickToBottomRef.current = true;
@@ -241,7 +291,19 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       writerRef.current?.discard();
       writerRef.current = WavFileWriter.create(AUDIO_CONFIG.sampleRate);
 
-      recorder.start();
+      // 0.13 made start() async and report failure through a Result instead
+      // of throwing. Unchecked, a refused start would leave the model
+      // streaming against a microphone that never delivers a buffer — an
+      // app that looks like it is recording and silently produces nothing.
+      const started = await recorder.start();
+      if (started.status === 'error') {
+        writerRef.current?.discard();
+        writerRef.current = null;
+        console.error('Failed to start recorder:', started.message);
+        Alert.alert('Error', ERROR_MESSAGES.RECORDING_FAILED);
+        return;
+      }
+
       // Bug fix: this haptic used to fire after `await model.stream()`,
       // which doesn't resolve until streaming actually stops — so the
       // "start" haptic was actually firing at stop time (double-buzzing
@@ -258,11 +320,17 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       }, UI_CONFIG.MAX_RECORDING_DURATION_SECONDS * 1000);
 
       try {
-        // 300ms (down from 500ms): shorter silence gaps count as a commit
-        // point, so continuous speech with only brief pauses still gets
-        // incremental commits instead of holding everything as
+        // Both knobs live in STREAMING_CONFIG so the CPU/latency trade-off
+        // can be profiled by editing one place. vadDetectionMargin is 300ms
+        // (down from the library's 500ms): shorter silence gaps count as a
+        // commit point, so continuous speech with only brief pauses still
+        // gets incremental commits instead of holding everything as
         // non-committed until a long enough gap flushes it all at once.
-        const streamIter = model.stream({ useVAD: true, vadDetectionMargin: 300 });
+        const streamIter = model.stream({
+          useVAD: true,
+          timeout: STREAMING_CONFIG.INFERENCE_TIMEOUT_MS,
+          vadDetectionMargin: STREAMING_CONFIG.VAD_DETECTION_MARGIN_MS,
+        });
         for await (const { committed, nonCommitted } of streamIter) {
           if (committed.text) {
             transcriptRef.current.committed += committed.text;
@@ -294,7 +362,14 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
 
     setIsCapturingAudio(true);
     try {
-      recorder.stop();
+      // Awaited before the WAV is finalized below: stop() is async in 0.13,
+      // and buffers already in flight are still delivered to onAudioReady
+      // until it settles. Finalizing first would null the writer out from
+      // under them and silently drop the tail of the recording.
+      const stopped = await recorder.stop();
+      if (stopped.status === 'error') {
+        console.warn('Recorder stop reported an error:', stopped.message);
+      }
       model.streamStop();
       audioLevel.value = 0;
 
@@ -335,6 +410,74 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
     }
   };
 
+  /**
+   * Second, non-streaming pass over the saved WAV. Attaches word-level
+   * timestamps and, when nothing has touched the note since Save, adopts
+   * this pass's transcript over the streamed one.
+   *
+   * Deliberately fire-and-forget: the note is already saved and useful, so
+   * a failure here costs only the timeline. The session remount is deferred
+   * until this settles — remounting swaps in a fresh model instance and
+   * would abort the in-flight transcribe().
+   */
+  const runTimelinePass = async (saved: Note) => {
+    const audioUri = saved.audioUri;
+    if (!audioUri || saved.duration > TIMELINE_CONFIG.MAX_DURATION_SECONDS) {
+      onSessionReset();
+      return;
+    }
+
+    setIsFinishingTimeline(true);
+    const pass = (async () => {
+      const timeline = await buildTimeline(modelRef.current, audioUri, saved.duration);
+      if (!timeline) return;
+
+      try {
+        // Compare-and-swap: the user reaches the saved note while this is
+        // still running, so only adopt the new text if nothing has touched
+        // it since Save. An edit made in that window wins outright — and in
+        // that case the timeline is dropped too, since it would describe
+        // words the user has already replaced.
+        const stored = (await storageService.getNotes()).find((n) => n.id === saved.id);
+        const untouched =
+          stored?.transcription === saved.transcription && stored?.title === saved.title;
+
+        if (!untouched) return;
+
+        // Timings go to a sidecar file rather than onto the note — see
+        // services/timelineStore.ts for why.
+        saveTimeline(saved.id, timeline.segments);
+
+        // The pass's own text supersedes the streamed transcript. Streaming
+        // decodes a rolling buffer that is silence-trimmed and dropped at
+        // each commit point, so its weakest words sit at those boundaries;
+        // this pass sees whole windows of the finished file and is the
+        // better transcript. Taking it also keeps the stored text, the
+        // timeline, listen mode and SRT in agreement.
+        if (timeline.text) {
+          await storageService.updateNote(saved.id, {
+            transcription: timeline.text,
+            // The title was derived from the streamed text at save time, so
+            // it is regenerated from the same source as the text it now
+            // summarizes.
+            title: buildAutoTitle(timeline.text),
+          });
+        }
+      } catch (error) {
+        console.warn('Failed to attach transcript timeline to note:', error);
+      }
+    })();
+
+    timelinePassRef.current = pass;
+    try {
+      await pass;
+    } finally {
+      timelinePassRef.current = null;
+      setIsFinishingTimeline(false);
+      onSessionReset();
+    }
+  };
+
   const handleSaveTranscription = async () => {
     if (!transcript.committed) {
       Alert.alert('No Transcription', 'Nothing to save. Try recording some speech first.');
@@ -359,8 +502,12 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       await storageService.saveNote(note);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-      onSessionReset();
+      // The note is saved and the user moves on immediately — the timeline
+      // is enrichment, not part of the save. It resolves onto the stored
+      // note a few seconds later, and the note is perfectly usable without
+      // it if the pass fails.
       router.push('/notes');
+      void runTimelinePass(note);
     } catch (error) {
       console.error('Failed to save note:', error);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -370,7 +517,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
   };
 
   const handleReset = async () => {
-    if (model.isGenerating) {
+    if (isRecording) {
       await handleStopStreaming();
     }
     // Bug fix: Reset used to discard `captured` (and the whole session, via
@@ -442,13 +589,13 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
           <Animated.View entering={FadeInDown.duration(400)} style={{ flex: 1 }}>
             <View style={styles.recordButtonContainer}>
               <PulseRecordButton
-                isRecording={model.isGenerating}
-                disabled={!model.isReady || isSaving}
-                onPress={model.isGenerating ? handleStopStreaming : handleStartStreaming}
+                isRecording={isRecording}
+                disabled={!model.isReady || isSaving || isFinishingTimeline}
+                onPress={isRecording ? handleStopStreaming : handleStartStreaming}
                 colors={colors}
               />
               <RecordingStatus
-                isRecording={model.isGenerating}
+                isRecording={isRecording}
                 level={audioLevel}
                 colors={colors}
                 styles={styles}
@@ -458,7 +605,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
             <Card style={styles.transcriptionCard} elevation="sm">
               <View style={styles.transcriptionHeader}>
                 <Text style={styles.transcriptionLabel}>
-                  {model.isGenerating ? 'Listening…' : 'Transcription'}
+                  {isRecording ? 'Listening…' : 'Transcription'}
                 </Text>
                 {wordCount > 0 && (
                   <Text style={styles.wordCount}>
@@ -486,19 +633,27 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
                   </Text>
                 ) : (
                   <Text style={styles.waitingText}>
-                    {model.isGenerating ? 'Speak now…' : 'Tap the microphone to start recording'}
+                    {isRecording ? 'Speak now…' : 'Tap the microphone to start recording'}
                   </Text>
                 )}
               </ScrollView>
 
-              {hasTranscript && !model.isGenerating && (
+              {hasTranscript && !isRecording && (
                 <Animated.View entering={FadeIn.duration(200)} style={styles.actionButtons}>
                   <Button
-                    label={isSaving ? 'Saving…' : isCapturingAudio ? 'Processing audio…' : 'Save'}
+                    label={
+                      isFinishingTimeline
+                        ? 'Finishing…'
+                        : isSaving
+                          ? 'Saving…'
+                          : isCapturingAudio
+                            ? 'Processing audio…'
+                            : 'Save'
+                    }
                     icon="checkmark-circle"
                     variant="primary"
-                    loading={isSaving}
-                    disabled={isSaving || isCapturingAudio}
+                    loading={isSaving || isFinishingTimeline}
+                    disabled={isSaving || isCapturingAudio || isFinishingTimeline}
                     onPress={handleSaveTranscription}
                     haptic="none"
                     style={styles.saveButton}
@@ -507,7 +662,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
                     label="Reset"
                     icon="refresh"
                     variant="secondary"
-                    disabled={isSaving || isCapturingAudio}
+                    disabled={isSaving || isCapturingAudio || isFinishingTimeline}
                     onPress={handleReset}
                     style={styles.resetButton}
                   />

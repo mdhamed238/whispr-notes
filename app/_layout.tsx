@@ -1,11 +1,14 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { DarkTheme, DefaultTheme, Theme, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
-import { initExecutorch } from 'react-native-executorch';
-import { ExpoResourceFetcher } from 'react-native-executorch-expo-resource-fetcher';
+// SDK 56 dropped expo-router's react-navigation compatibility, and
+// executorch 0.10 moved the timestamped transcription API (verbose segments)
+// behind its `/legacy` entry point — the new root API returns plain strings
+// with no word timings, which the note timeline depends on.
+import { initExecutorch } from 'react-native-executorch/legacy';
+import { ExpoResourceFetcher } from 'react-native-executorch-expo-resource-fetcher/legacy';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/components/useColorScheme';
@@ -53,29 +56,17 @@ export default function RootLayout() {
 function RootLayoutNav() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
-  const base = colorScheme === 'dark' ? DarkTheme : DefaultTheme;
 
-  // Only the palette is swapped to match the new premium tokens — the rest
-  // of the navigator theme (fonts, etc.) stays whatever React Navigation
-  // ships by default.
-  const navTheme: Theme = {
-    ...base,
-    colors: {
-      ...base.colors,
-      background: colors.background,
-      card: colors.card,
-      border: colors.border,
-      text: colors.text,
-      primary: colors.tint,
-    },
-  };
-
+  // The react-navigation ThemeProvider this used to wrap is gone: expo-router
+  // no longer supports react-navigation as of SDK 56. Every screen already
+  // paints its own background from the same tokens and runs with
+  // `headerShown: false`, so the only thing the navigator theme still did was
+  // colour the area behind a screen during transitions — which contentStyle
+  // covers directly.
   return (
-    <ThemeProvider value={navTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="note/[id]" options={{ presentation: 'modal', headerShown: false }} />
-      </Stack>
-    </ThemeProvider>
+    <Stack screenOptions={{ contentStyle: { backgroundColor: colors.background } }}>
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="note/[id]" options={{ presentation: 'modal', headerShown: false }} />
+    </Stack>
   );
 }

@@ -10,6 +10,33 @@ export const AUDIO_CONFIG: AudioConfig = {
   numberOfChannels: 1, // Mono audio
 };
 
+// Streaming transcription tuning.
+//
+// `timeout` is how long the library waits between consecutive model
+// inferences (its own default is 100ms). It is the CPU/battery knob — NOT
+// the capture buffer above, which only controls how often audio crosses the
+// JS bridge. Raising it reduces inference frequency at the cost of how
+// quickly interim text appears.
+//
+// `vadDetectionMargin` is how much silence must follow speech before the
+// VAD commits a segment (library default 500ms). It trades commit latency,
+// not CPU, so leave it fixed while profiling `timeout`.
+export const STREAMING_CONFIG = {
+  INFERENCE_TIMEOUT_MS: 100,
+  VAD_DETECTION_MARGIN_MS: 300,
+} as const;
+
+// Ceiling on the post-save timestamp pass (services/transcriptionTimeline).
+//
+// That pass re-transcribes the whole finished recording in one call, so its
+// cost grows with recording length while the record screen waits to reset.
+// Past this length the note is saved with text only rather than stalling the
+// UI for minutes on a recording that is unlikely to be scrubbed word by word
+// anyway. Raise it once the pass has been measured on real hardware.
+export const TIMELINE_CONFIG = {
+  MAX_DURATION_SECONDS: 600,
+} as const;
+
 // Storage keys for AsyncStorage
 export const STORAGE_KEYS = {
   TRANSCRIPTIONS: 'transcriptions',
