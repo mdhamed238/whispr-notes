@@ -10,6 +10,16 @@ export const AUDIO_CONFIG: AudioConfig = {
   numberOfChannels: 1, // Mono audio
 };
 
+// Length of each captured audio buffer, in seconds. This is how often audio
+// crosses the JS bridge — it is NOT how often the model runs; that is
+// STREAMING_CONFIG.INFERENCE_TIMEOUT_MS below.
+//
+// Lives here rather than on the record screen because the harness
+// (services/transcriptionHarness) replays fixture audio at this same chunk
+// size and cadence: feeding the model in different-sized pieces than the
+// microphone does would not exercise the same streaming path.
+export const CAPTURE_BUFFER_SECONDS = 0.1;
+
 // Streaming transcription tuning.
 //
 // `timeout` is how long the library waits between consecutive model

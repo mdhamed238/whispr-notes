@@ -22,7 +22,7 @@
  * appear, and this must not slow it down or put it at risk.
  */
 
-import { OfflineAudioContext } from 'react-native-audio-api';
+import { decodeAudioData } from 'react-native-audio-api';
 // `/legacy`: executorch 0.10's new root API has no `verbose` option and
 // returns plain strings, so the timestamped types live only here.
 import type { SpeechToTextType, TranscriptionSegment } from 'react-native-executorch/legacy';
@@ -63,24 +63,28 @@ function isUsable(segments: TranscriptSegment[]): boolean {
 }
 
 /**
- * Decodes a recorded WAV back to the 16 kHz mono PCM the model expects.
+ * Decodes an audio source to the 16 kHz mono PCM the model expects.
  *
- * Uses an OfflineAudioContext rather than an AudioContext on purpose: this
- * runs moments after recording stopped, and an output context would take the
- * audio session (configured `playAndRecord` for the mic) with it.
+ * `source` is a file URI or a `require()`d bundled asset — `decodeAudioData`
+ * resolves both, which is what lets the harness
+ * (services/transcriptionHarness) feed fixture audio through this exact
+ * path rather than a parallel one that might differ. Whatever rate the
+ * source file carries, it comes back resampled to `sampleRate`.
+ *
+ * Called as the free function rather than through an audio context on
+ * purpose. `BaseAudioContext.decodeAudioData` only forwards to this same
+ * decoder with `this.sampleRate`, so a context contributes nothing here but
+ * cost: constructing one spins up an audio runtime, and an
+ * OfflineAudioContext also eagerly allocates and zero-fills a render buffer
+ * of `length` frames (`resultBuffer_`, in the library's native constructor)
+ * that nothing ever renders into — 38 MB for a ten-minute note, on top of
+ * the waveform this actually returns.
+ *
+ * The returned Float32Array is a zero-copy view of the decoded channel; the
+ * native buffer stays alive as long as the array does.
  */
-async function decodeWavToPcm(audioUri: string, durationSeconds: number): Promise<Float32Array> {
-  const length = Math.max(1, Math.ceil(durationSeconds * AUDIO_CONFIG.sampleRate));
-  const context = new OfflineAudioContext({
-    numberOfChannels: AUDIO_CONFIG.numberOfChannels,
-    length,
-    sampleRate: AUDIO_CONFIG.sampleRate,
-  });
-
-  // react-native-audio-api 0.13 merged decodeAudioDataSource into
-  // decodeAudioData, which accepts a path or URI (it strips `file://`
-  // itself) and resamples to the context's sample rate — 16 kHz here.
-  const decoded = await context.decodeAudioData(audioUri);
+export async function decodeToPcm(source: string | number): Promise<Float32Array> {
+  const decoded = await decodeAudioData(source, AUDIO_CONFIG.sampleRate);
   return decoded.getChannelData(0);
 }
 
@@ -106,11 +110,10 @@ export interface Timeline {
  */
 export async function buildTimeline(
   model: Pick<SpeechToTextType, 'transcribe'>,
-  audioUri: string,
-  durationSeconds: number
+  audioUri: string
 ): Promise<Timeline | null> {
   try {
-    const waveform = await decodeWavToPcm(audioUri, durationSeconds);
+    const waveform = await decodeToPcm(audioUri);
     if (waveform.length === 0) {
       return null;
     }
