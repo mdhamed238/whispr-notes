@@ -13,6 +13,7 @@ import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import {
   AUDIO_CONFIG,
+  CAPTURE_BUFFER_SECONDS,
   ERROR_MESSAGES,
   STREAMING_CONFIG,
   TIMELINE_CONFIG,
@@ -22,6 +23,7 @@ import { FontSize, Spacing } from '@/constants/Spacing';
 import { Radius, Shadow } from '@/constants/theme';
 import storageService from '@/services/storageService';
 import { saveTimeline } from '@/services/timelineStore';
+import { runHarness } from '@/services/transcriptionHarness';
 import { buildTimeline } from '@/services/transcriptionTimeline';
 import { WavFileWriter } from '@/services/wavEncoder';
 import { Note } from '@/types';
@@ -67,11 +69,6 @@ import AnimatedPressable from '@/components/ui/AnimatedPressable';
 // keep auto-scrolling. Scrolling up past this parks the view so the user
 // can read back through a long transcript without being yanked down.
 const AUTOSCROLL_STICK_THRESHOLD = 32;
-
-// Length of each captured audio buffer. This is how often audio crosses the
-// JS bridge — it is NOT how often the model runs; that is
-// STREAMING_CONFIG.INFERENCE_TIMEOUT_MS.
-const CAPTURE_BUFFER_SECONDS = 0.1;
 
 function buildAutoTitle(transcription: string): string {
   const trimmed = transcription.trim();
@@ -191,12 +188,16 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
   const timelinePassRef = useRef<Promise<void> | null>(null);
   const [isFinishingTimeline, setIsFinishingTimeline] = useState(false);
 
+  // Dev-only fixture run (see services/transcriptionHarness).
+  const [isRunningHarness, setIsRunningHarness] = useState(false);
+
   // useSpeechToText raises `isGenerating` for transcribe() as well as
-  // stream(), so during the post-save timeline pass the model reports itself
-  // as generating even though nothing is being recorded. Without this the
-  // record button would show its stop state and tapping it would call
-  // handleStopStreaming against an inference that isn't a recording.
-  const isRecording = model.isGenerating && !isFinishingTimeline;
+  // stream(), so during the post-save timeline pass — and during a harness
+  // run, which drives both — the model reports itself as generating even
+  // though nothing is being recorded. Without this the record button would
+  // show its stop state and tapping it would call handleStopStreaming
+  // against an inference that isn't a recording.
+  const isRecording = model.isGenerating && !isFinishingTimeline && !isRunningHarness;
 
   // Runaway guard: force-stops a recording left running by accident.
   const maxDurationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -229,6 +230,17 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       iosOptions: ['allowBluetoothHFP', 'defaultToSpeaker'],
     });
 
+    // The options below are a *preference*, not a contract: 0.13 opens the
+    // input stream at the hardware rate and resamples into the callback
+    // (miniaudio on Android, AVAudioConverter on iOS), so what actually
+    // arrives can differ from what was asked for. Both consumers of these
+    // buffers assume AUDIO_CONFIG.sampleRate — streamInsert feeds the model,
+    // which expects 16 kHz, and the WAV header is written from the same
+    // constant — so a mismatch is silent: audio at the wrong rate is
+    // transcribed and stored as if it were 16 kHz. Logged on change rather
+    // than per buffer (they arrive ~10x/second) to make that visible.
+    let lastFormat = '';
+
     const registration = recorder.onAudioReady(
       {
         sampleRate: AUDIO_CONFIG.sampleRate,
@@ -237,6 +249,17 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       },
       ({ buffer }) => {
         try {
+          if (__DEV__) {
+            const format = `${buffer.sampleRate}Hz ${buffer.numberOfChannels}ch ${buffer.length}f`;
+            if (format !== lastFormat) {
+              lastFormat = format;
+              const expected = `${AUDIO_CONFIG.sampleRate}Hz ${AUDIO_CONFIG.numberOfChannels}ch ${AUDIO_CONFIG.sampleRate * CAPTURE_BUFFER_SECONDS}f`;
+              console.log(
+                `[capture] ${format}` + (format === expected ? '' : ` — EXPECTED ${expected}`)
+              );
+            }
+          }
+
           const channelData = buffer.getChannelData(0);
           modelRef.current.streamInsert(channelData);
           writerRef.current?.write(channelData);
@@ -291,6 +314,25 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       writerRef.current?.discard();
       writerRef.current = WavFileWriter.create(AUDIO_CONFIG.sampleRate);
 
+      // Fired *before* the microphone goes live, and awaited, so the motor
+      // has run and settled before the first buffer is captured.
+      //
+      // This haptic is a physical vibration of the same device the
+      // microphone is in, so ordering it after start() recorded the buzz
+      // into the first ~100ms of every take — over the first word. The
+      // damage is in the WAV itself, not just the live stream: a one-shot
+      // transcribe() of a saved "Hi everyone" returns "Bye everyone", and
+      // the streamed pass returns "Bye. (buzzer)" — `(buzzer)` being
+      // Whisper's sound tag for exactly this kind of mechanical noise.
+      //
+      // It reached that position as a fix for the opposite bug: it used to
+      // sit after `await model.stream()`, which doesn't resolve until
+      // streaming *stops*, so the "start" haptic actually fired at stop time
+      // (double-buzzing alongside handleStopStreaming's own) and start was
+      // silent. Both constraints are satisfied here — before start(), not
+      // after stream().
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
       // 0.13 made start() async and report failure through a Result instead
       // of throwing. Unchecked, a refused start would leave the model
       // streaming against a microphone that never delivers a buffer — an
@@ -303,12 +345,6 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
         Alert.alert('Error', ERROR_MESSAGES.RECORDING_FAILED);
         return;
       }
-
-      // Bug fix: this haptic used to fire after `await model.stream()`,
-      // which doesn't resolve until streaming actually stops — so the
-      // "start" haptic was actually firing at stop time (double-buzzing
-      // alongside handleStopStreaming's own haptic), and start was silent.
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
       if (maxDurationTimer.current) {
         clearTimeout(maxDurationTimer.current);
@@ -429,7 +465,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
 
     setIsFinishingTimeline(true);
     const pass = (async () => {
-      const timeline = await buildTimeline(modelRef.current, audioUri, saved.duration);
+      const timeline = await buildTimeline(modelRef.current, audioUri);
       if (!timeline) return;
 
       try {
@@ -475,6 +511,42 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       timelinePassRef.current = null;
       setIsFinishingTimeline(false);
       onSessionReset();
+    }
+  };
+
+  /**
+   * Runs the fixture harness against the live model instance.
+   *
+   * Deliberately the same `modelRef.current` the recorder feeds, not a
+   * second instance: the point is to test the model this app actually
+   * loaded, on this device, with whatever it downloaded.
+   */
+  const handleRunHarness = async () => {
+    setIsRunningHarness(true);
+    try {
+      // Runs every fixture once. To narrow a sweep or measure the streamed
+      // route's run-to-run spread, pass options — e.g.
+      // `{ only: 'greeting', streamRepeats: 5 }`.
+      const results = await runHarness(modelRef.current);
+      const summary = results
+        .map((result) => {
+          if (result.oneShotWer === undefined) {
+            return `${result.fixture}\n${result.oneShot || '(empty)'}`;
+          }
+          // One-shot leads: it is the deterministic column, so it is the one
+          // worth reading off a single run.
+          return `${result.fixture} — one-shot ${result.oneShotWer.toFixed(2)} / streamed ${result.streamedWer!.toFixed(2)}`;
+        })
+        .join('\n');
+      Alert.alert(
+        'Harness',
+        summary || 'No fixtures ran. See the Metro log.',
+        undefined,
+        // Transcripts run long; the full side-by-side is in the log.
+        { cancelable: true }
+      );
+    } finally {
+      setIsRunningHarness(false);
     }
   };
 
@@ -600,6 +672,17 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
                 colors={colors}
                 styles={styles}
               />
+              {__DEV__ && (
+                <Button
+                  label={isRunningHarness ? 'Running harness…' : 'Run harness'}
+                  icon="flask"
+                  variant="secondary"
+                  loading={isRunningHarness}
+                  disabled={!model.isReady || isRecording || isRunningHarness || isFinishingTimeline}
+                  onPress={handleRunHarness}
+                  style={styles.harnessButton}
+                />
+              )}
             </View>
 
             <Card style={styles.transcriptionCard} elevation="sm">
@@ -884,6 +967,7 @@ function createStyles(colors: typeof Colors.light) {
     },
     progressFill: { height: '100%', backgroundColor: colors.tint, borderRadius: Radius.pill },
     recordButtonContainer: { alignItems: 'center', marginBottom: Spacing.lg },
+    harnessButton: { marginTop: Spacing.md, alignSelf: 'center' },
     recordButtonText: { fontSize: FontSize.md, fontWeight: '600', color: colors.textMuted, marginTop: Spacing.sm },
     elapsedText: {
       fontSize: FontSize.lg,
