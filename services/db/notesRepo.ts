@@ -238,15 +238,23 @@ export async function findByContentHash(hash: string): Promise<Note | null> {
 export async function deleteAllData(): Promise<void> {
   await ready();
   const db = await getDb();
+  // secure_delete overwrites freed pages, and the checkpoint + VACUUM make
+  // sure no deleted text survives in the WAL or the database's free list.
+  await db.execAsync('PRAGMA secure_delete = ON;');
   await db.withExclusiveTransactionAsync(async (txn) => {
-    await txn.execAsync('DELETE FROM notes;');
+    await txn.execAsync('DELETE FROM notes; DELETE FROM notes_fts;');
   });
-  for (const name of ['audio', 'timelines', 'exports', 'imports']) {
+  await db.execAsync('PRAGMA wal_checkpoint(TRUNCATE); VACUUM;');
+
+  const dirs = [
+    ...['audio', 'timelines', 'exports', 'imports'].map((name) => new Directory(Paths.document, name)),
+    ...['exports', 'imports'].map((name) => new Directory(Paths.cache, name)),
+  ];
+  for (const dir of dirs) {
     try {
-      const dir = new Directory(Paths.document, name);
       if (dir.exists) dir.delete();
     } catch (error) {
-      console.warn(`Failed to delete ${name} directory:`, error);
+      console.warn(`Failed to delete ${dir.uri}:`, error);
     }
   }
   emit(null);
