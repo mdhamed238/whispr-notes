@@ -25,7 +25,7 @@ import { useDeviceTier } from '@/hooks/useDeviceTier';
 import * as notesRepo from '@/services/db/notesRepo';
 import { haptic } from '@/services/haptics';
 import { resetSettings, useSettings } from '@/services/settings';
-import { runImportFlow } from '@/services/import/importFlow';
+import { runImportFlow } from '@/services/import/importer';
 import { backupAllNotes } from '@/services/export/backup';
 
 const TIER_LABEL = { flagship: 'Flagship', standard: 'Standard', lite: 'Lite' } as const;
