@@ -1,6 +1,6 @@
 /**
- * Pro entitlement. Until purchases are wired (Task 13) this reads the cached
- * entitlement and, in development builds only, the developer override.
+ * Pro entitlement. Reads the cached entitlement (kept fresh by the purchases
+ * service) and, in development builds only, the developer override.
  */
 import { useSettings } from '@/services/settings';
 

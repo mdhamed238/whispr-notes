@@ -40,6 +40,7 @@ import { languageLabel } from '@/constants/languages';
 import { FontSize, Spacing } from '@/constants/Spacing';
 import { Radius } from '@/constants/theme';
 import { useNote } from '@/hooks/useNote';
+import * as enhanceQueue from '@/services/ai/enhanceQueue';
 import * as notesRepo from '@/services/db/notesRepo';
 import { EXPORT_MIME, exportTextFile, shareFile } from '@/services/export/exporter';
 import { formatClock, formatNoteDate } from '@/services/export/generators';
@@ -241,6 +242,19 @@ export default function NoteDetailScreen() {
     sheet.open({
       title: title || 'Note',
       actions: [
+        ...(note?.audioUri && note.enhancement !== 'pending' && note.enhancement !== 'running'
+          ? [
+              {
+                label: 'Re-transcribe audio',
+                icon: 'sparkles-outline' as const,
+                onPress: () => {
+                  flushPendingSave();
+                  void enhanceQueue.enqueue(note.id, 'enhance');
+                  toast.show({ message: 'Re-transcribing with your best model…' });
+                },
+              },
+            ]
+          : []),
         {
           label: 'Duplicate',
           icon: 'copy-outline',
@@ -339,7 +353,9 @@ export default function NoteDetailScreen() {
               {note.source === 'import' ? ' · Imported' : ''}
             </Text>
 
-            {enhancing && <EnhancementBanner note={note} colors={colors} styles={styles} />}
+            {enhancing && (
+              <EnhancementBanner note={note} colors={colors} styles={styles} onCancel={() => void enhanceQueue.cancel(note.id, 'enhance')} />
+            )}
 
             {note.audioUri && <NotePlayer noteId={note.id} audioUri={note.audioUri} player={player} colors={colors} />}
 
@@ -414,10 +430,12 @@ function EnhancementBanner({
   note,
   colors,
   styles,
+  onCancel,
 }: {
   note: Note;
   colors: typeof Colors.light;
   styles: ReturnType<typeof createStyles>;
+  onCancel: () => void;
 }) {
   const known = note.enhancement === 'running' && note.enhancementProgress >= 0;
   const pct = Math.round(Math.max(0, Math.min(1, note.enhancementProgress)) * 100);
@@ -432,6 +450,7 @@ function EnhancementBanner({
           <View style={[styles.bannerFill, { width: known ? `${pct}%` : '35%' }]} />
         </View>
       </View>
+      <IconButton name="close" size={14} background="transparent" onPress={onCancel} accessibilityLabel="Cancel enhancement" />
     </View>
   );
 }

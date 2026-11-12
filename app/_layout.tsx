@@ -17,6 +17,8 @@ import { useColorScheme } from '@/components/useColorScheme';
 import { ActionSheetProvider } from '@/components/ui/ActionSheet';
 import { ToastProvider } from '@/components/ui/Toast';
 import Colors from '@/constants/Colors';
+import * as enhanceQueue from '@/services/ai/enhanceQueue';
+import '@/services/ai/summarizer';
 import { getSettings, peekSettings } from '@/services/settings';
 
 initExecutorch({ resourceFetcher: ExpoResourceFetcher });
@@ -43,7 +45,11 @@ export default function RootLayout() {
   // before the splash screen hides.
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   useEffect(() => {
-    getSettings().finally(() => setSettingsLoaded(true));
+    getSettings().finally(() => {
+      setSettingsLoaded(true);
+      // Resume AI work a previous session left unfinished.
+      void enhanceQueue.start();
+    });
   }, []);
   const loaded = fontsLoaded && settingsLoaded;
 

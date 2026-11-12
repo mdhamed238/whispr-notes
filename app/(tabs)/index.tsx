@@ -16,15 +16,14 @@ import {
   CAPTURE_BUFFER_SECONDS,
   ERROR_MESSAGES,
   STREAMING_CONFIG,
-  TIMELINE_CONFIG,
   UI_CONFIG,
 } from '@/constants/config';
 import { FontSize, Spacing } from '@/constants/Spacing';
 import { Radius, Shadow } from '@/constants/theme';
 import * as notesRepo from '@/services/db/notesRepo';
-import { saveTimeline } from '@/services/timelineStore';
+import * as enhanceQueue from '@/services/ai/enhanceQueue';
+import { useSettings } from '@/services/settings';
 import { runHarness } from '@/services/transcriptionHarness';
-import { buildTimeline } from '@/services/transcriptionTimeline';
 import { WavFileWriter } from '@/services/wavEncoder';
 import { Note } from '@/types';
 import { haptic } from '@/services/haptics';
@@ -115,6 +114,8 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
   const sheet = useActionSheet();
+  const [settings] = useSettings();
+  const nonEnglish = settings.transcriptionLanguage !== 'auto' && settings.transcriptionLanguage !== 'en';
   const toast = useToast();
 
   // react-native-audio-api 0.13 moved buffer configuration off the
@@ -184,13 +185,6 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
   // which flips true the instant streamStop() runs — tapping Save in that
   // window could save a note out from under the real recording.
   const [isCapturingAudio, setIsCapturingAudio] = useState(false);
-  // The post-save timestamp pass (see services/transcriptionTimeline.ts).
-  // Held in a ref because two other paths must not run while it is in
-  // flight: starting a new recording (transcribe() and stream() would
-  // contend for the same model instance) and the session remount that
-  // Save schedules (which would tear the model down mid-inference).
-  const timelinePassRef = useRef<Promise<void> | null>(null);
-  const [isFinishingTimeline, setIsFinishingTimeline] = useState(false);
 
   // Dev-only fixture run (see services/transcriptionHarness).
   const [isRunningHarness, setIsRunningHarness] = useState(false);
@@ -201,7 +195,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
   // though nothing is being recorded. Without this the record button would
   // show its stop state and tapping it would call handleStopStreaming
   // against an inference that isn't a recording.
-  const isRecording = model.isGenerating && !isFinishingTimeline && !isRunningHarness;
+  const isRecording = model.isGenerating && !isRunningHarness;
 
   // Runaway guard: force-stops a recording left running by accident.
   const maxDurationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -227,6 +221,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       // open here belongs to a recording that will never be saved.
       writerRef.current?.discard();
       writerRef.current = null;
+      enhanceQueue.setRecordingActive(false);
     };
   }, []);
 
@@ -316,13 +311,6 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
         return;
       }
 
-      // A timeline pass from the previous note may still hold the model.
-      // It is short and already running, so waiting is preferable to
-      // starting a stream that would contend with it.
-      if (timelinePassRef.current) {
-        await timelinePassRef.current;
-      }
-
       transcriptRef.current = { committed: '', nonCommitted: '' };
       setTranscript({ committed: '', nonCommitted: '' });
       stickToBottomRef.current = true;
@@ -364,6 +352,8 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
         Alert.alert('Error', ERROR_MESSAGES.RECORDING_FAILED);
         return;
       }
+      // Background AI passes wait while the microphone is live.
+      enhanceQueue.setRecordingActive(true);
 
       if (maxDurationTimer.current) {
         clearTimeout(maxDurationTimer.current);
@@ -426,6 +416,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
         console.warn('Recorder stop reported an error:', stopped.message);
       }
       model.streamStop();
+      enhanceQueue.setRecordingActive(false);
       audioLevel.value = 0;
 
       if (maxDurationTimer.current) {
@@ -471,85 +462,6 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       void haptic('warning');
       toast.show({ message: 'Recording stopped by an interruption. Save it or record again.', durationMs: 6000 });
     });
-  };
-
-  /**
-   * Second, non-streaming pass over the saved WAV. Attaches word-level
-   * timestamps and, when nothing has touched the note since Save, adopts
-   * this pass's transcript over the streamed one.
-   *
-   * Deliberately fire-and-forget: the note is already saved and useful, so
-   * a failure here costs only the timeline. The session remount is deferred
-   * until this settles — remounting swaps in a fresh model instance and
-   * would abort the in-flight transcribe().
-   */
-  const runTimelinePass = async (saved: Note) => {
-    const audioUri = saved.audioUri;
-    if (!audioUri || saved.duration > TIMELINE_CONFIG.MAX_DURATION_SECONDS) {
-      onSessionReset();
-      return;
-    }
-
-    setIsFinishingTimeline(true);
-    const pass = (async () => {
-      await notesRepo
-        .updateNote(saved.id, { enhancement: 'running', enhancementProgress: -1 })
-        .catch(() => undefined);
-      const timeline = await buildTimeline(modelRef.current, audioUri);
-      if (!timeline) {
-        await notesRepo.updateNote(saved.id, { enhancement: 'failed', enhancementProgress: 0 }).catch(() => undefined);
-        return;
-      }
-
-      try {
-        // Compare-and-swap: the user reaches the saved note while this is
-        // still running, so only adopt the new text if nothing has touched
-        // it since Save. An edit made in that window wins outright — and in
-        // that case the timeline is dropped too, since it would describe
-        // words the user has already replaced.
-        const stored = await notesRepo.getNote(saved.id);
-        // An edit to the transcript made while this ran wins outright, and
-        // the timeline is dropped too since it describes replaced words.
-        if (!stored || stored.transcription !== saved.transcription) return;
-
-        // Timings go to a sidecar file rather than onto the note — see
-        // services/timelineStore.ts for why.
-        saveTimeline(saved.id, timeline.segments);
-
-        // The pass's own text supersedes the streamed transcript. Streaming
-        // decodes a rolling buffer that is silence-trimmed and dropped at
-        // each commit point, so its weakest words sit at those boundaries;
-        // this pass sees whole windows of the finished file and is the
-        // better transcript. Taking it also keeps the stored text, the
-        // timeline, listen mode and SRT in agreement.
-        if (timeline.text) {
-          // Compare-and-swap on the version just read, so an edit landing
-          // between that read and this write is never overwritten. The title
-          // is regenerated only while it is still machine-written.
-          await notesRepo.updateNote(
-            saved.id,
-            {
-              transcription: timeline.text,
-              ...(stored.titleIsAuto ? { title: buildAutoTitle(timeline.text) } : {}),
-            },
-            { expectUpdatedAt: stored.updatedAt }
-          );
-        }
-      } catch (error) {
-        console.warn('Failed to attach transcript timeline to note:', error);
-      } finally {
-        await notesRepo.updateNote(saved.id, { enhancement: 'done', enhancementProgress: 1 }).catch(() => undefined);
-      }
-    })();
-
-    timelinePassRef.current = pass;
-    try {
-      await pass;
-    } finally {
-      timelinePassRef.current = null;
-      setIsFinishingTimeline(false);
-      onSessionReset();
-    }
   };
 
   /**
@@ -617,6 +529,9 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       };
 
       await notesRepo.createNote(note);
+      // The enhanced transcript, timings and summary are background work
+      // on the saved note (services/ai/enhanceQueue); the user moves on now.
+      if (note.audioUri) await enhanceQueue.enqueue(note.id, 'enhance');
       void haptic('success');
 
       // The note is saved and the user moves on immediately — the timeline
@@ -624,7 +539,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       // note a few seconds later, and the note is perfectly usable without
       // it if the pass fails.
       router.push(`/note/${note.id}`);
-      void runTimelinePass(note);
+      onSessionReset();
     } catch (error) {
       console.error('Failed to save note:', error);
       void haptic('error');
@@ -714,7 +629,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
             <View style={styles.recordButtonContainer}>
               <PulseRecordButton
                 isRecording={isRecording}
-                disabled={!model.isReady || isSaving || isFinishingTimeline}
+                disabled={!model.isReady || isSaving}
                 onPress={isRecording ? handleStopStreaming : handleStartStreaming}
                 colors={colors}
               />
@@ -730,7 +645,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
                   icon="flask"
                   variant="secondary"
                   loading={isRunningHarness}
-                  disabled={!model.isReady || isRecording || isRunningHarness || isFinishingTimeline}
+                  disabled={!model.isReady || isRecording || isRunningHarness}
                   onPress={handleRunHarness}
                   style={styles.harnessButton}
                 />
@@ -773,13 +688,17 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
                 )}
               </ScrollView>
 
+              {nonEnglish && (
+                <Text style={styles.languageHint}>
+                  Live preview is English-only. The saved note is transcribed in your language.
+                </Text>
+              )}
+
               {hasTranscript && !isRecording && (
                 <Animated.View entering={FadeIn.duration(200)} style={styles.actionButtons}>
                   <Button
                     label={
-                      isFinishingTimeline
-                        ? 'Finishing…'
-                        : isSaving
+                      isSaving
                           ? 'Saving…'
                           : isCapturingAudio
                             ? 'Processing audio…'
@@ -787,8 +706,8 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
                     }
                     icon="checkmark-circle"
                     variant="primary"
-                    loading={isSaving || isFinishingTimeline}
-                    disabled={isSaving || isCapturingAudio || isFinishingTimeline}
+                    loading={isSaving}
+                    disabled={isSaving || isCapturingAudio}
                     onPress={handleSaveTranscription}
                     haptic="none"
                     style={styles.saveButton}
@@ -797,7 +716,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
                     label="Reset"
                     icon="refresh"
                     variant="secondary"
-                    disabled={isSaving || isCapturingAudio || isFinishingTimeline}
+                    disabled={isSaving || isCapturingAudio}
                     onPress={confirmReset}
                     style={styles.resetButton}
                   />
@@ -1054,6 +973,7 @@ function createStyles(colors: typeof Colors.light) {
       fontStyle: 'italic',
       paddingVertical: Spacing.xl,
     },
+    languageHint: { fontSize: FontSize.xs, color: colors.textMuted, marginTop: Spacing.sm, textAlign: 'center' },
     actionButtons: { flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.lg },
     saveButton: { flex: 1 },
     resetButton: { flex: 1 },
