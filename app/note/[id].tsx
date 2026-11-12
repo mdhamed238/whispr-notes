@@ -47,7 +47,7 @@ import * as summarizer from '@/services/ai/summarizer';
 import { summaryAllowance } from '@/services/billing/quota';
 import { useSettings } from '@/services/settings';
 import * as notesRepo from '@/services/db/notesRepo';
-import { EXPORT_MIME, exportTextFile, shareFile } from '@/services/export/exporter';
+import { ExportPanel } from '@/components/ExportSheet';
 import { formatClock, formatNoteDate } from '@/services/export/generators';
 import { haptic } from '@/services/haptics';
 import { deleteTimeline } from '@/services/timelineStore';
@@ -230,21 +230,11 @@ export default function NoteDetailScreen() {
   const handleShare = () => {
     const n = currentNote();
     if (!n) return;
-    const share = async (format: 'txt' | 'srt') => {
-      try {
-        const uri = await exportTextFile(n, format);
-        await shareFile(uri, EXPORT_MIME[format], n.title);
-      } catch (error) {
-        console.error('Failed to export note:', error);
-        toast.show({ message: 'Could not export the note.', tone: 'error' });
-      }
-    };
+    flushPendingSave();
     sheet.open({
-      title: 'Share note',
-      actions: [
-        { label: 'Text (.txt)', icon: 'document-text-outline', onPress: () => share('txt') },
-        { label: 'Subtitles (.srt)', icon: 'film-outline', onPress: () => share('srt') },
-      ],
+      title: 'Export & share',
+      content: <ExportPanel note={n} isPro={isPro} hasTimeline={hasTimeline} />,
+      actions: [],
     });
   };
 

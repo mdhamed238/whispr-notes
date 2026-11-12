@@ -18,6 +18,7 @@ import { ActionSheetProvider } from '@/components/ui/ActionSheet';
 import { ToastProvider } from '@/components/ui/Toast';
 import Colors from '@/constants/Colors';
 import * as enhanceQueue from '@/services/ai/enhanceQueue';
+import { clearExports } from '@/services/export/exporter';
 import '@/services/ai/summarizer';
 import { getSettings, peekSettings } from '@/services/settings';
 
@@ -49,6 +50,8 @@ export default function RootLayout() {
       setSettingsLoaded(true);
       // Resume AI work a previous session left unfinished.
       void enhanceQueue.start();
+      // Export files are only needed until shared; don't let them pile up.
+      clearExports();
     });
   }, []);
   const loaded = fontsLoaded && settingsLoaded;

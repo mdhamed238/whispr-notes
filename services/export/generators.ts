@@ -109,3 +109,53 @@ export function toSrt(note: Note, timeline: TranscriptSegment[] | null): string 
     )
     .join('\n');
 }
+
+/** `[mm:ss]` stamp, or `[h:mm:ss]` past an hour. */
+export function stamp(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return h > 0 ? `${h}:${pad(m)}:${pad(s % 60)}` : `${pad(m)}:${pad(s % 60)}`;
+}
+
+function yamlString(value: string): string {
+  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, ' ')}"`;
+}
+
+export function toMarkdown(
+  note: Note,
+  o: { scope: ExportScope; segments: TranscriptSegment[] | null; timestamps: boolean }
+): string {
+  const front = [
+    '---',
+    `title: ${yamlString(note.title)}`,
+    `date: ${note.createdAt.toISOString()}`,
+    note.duration > 0 ? `duration: ${formatClock(note.duration)}` : null,
+    note.tags.length > 0 ? `tags: [${note.tags.join(', ')}]` : null,
+    note.language ? `language: ${note.language}` : null,
+    'source: WhisprNotes',
+    '---',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const parts: string[] = [front, `# ${note.title}`];
+  const s = note.summary;
+  if (s) {
+    if (s.overview) parts.push(`## Summary\n\n${s.overview.trim()}`);
+    if (s.keyPoints.length) parts.push(`## Key points\n\n${s.keyPoints.map((i) => `- ${i}`).join('\n')}`);
+    if (s.actionItems.length) parts.push(`## Action items\n\n${s.actionItems.map((i) => `- [ ] ${i}`).join('\n')}`);
+    if (s.decisions.length) parts.push(`## Decisions\n\n${s.decisions.map((i) => `- ${i}`).join('\n')}`);
+  }
+
+  if (o.scope === 'full' || !s) {
+    const segs = usableSegments(o.segments);
+    const body =
+      o.timestamps && segs.length > 0
+        ? segs.map((seg) => `[${stamp(seg.start)}] ${seg.text.trim()}`).join('\n\n')
+        : note.transcription.trim();
+    parts.push(s ? `## Transcript\n\n${body}` : body);
+  }
+  return `${parts.join('\n\n')}\n`;
+}

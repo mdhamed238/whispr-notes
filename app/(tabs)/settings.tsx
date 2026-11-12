@@ -67,11 +67,15 @@ export default function SettingsScreen() {
   const handleBackup = () =>
     requirePro(async () => {
       try {
-        await backupAllNotes();
+        const count = await backupAllNotes();
         void haptic('success');
+        toast.show({ message: `Backed up ${count} note${count === 1 ? '' : 's'}.`, tone: 'success' });
       } catch (error) {
         console.error('Backup failed:', error);
-        toast.show({ message: 'Backup failed. Check free storage and try again.', tone: 'error' });
+        toast.show({
+          message: error instanceof Error && error.message.includes('no notes') ? 'There are no notes to back up yet.' : 'Backup failed. Check free storage and try again.',
+          tone: 'error',
+        });
       }
     });
 
