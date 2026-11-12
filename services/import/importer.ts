@@ -10,6 +10,7 @@ import JSZip from 'jszip';
 import * as notesRepo from '../db/notesRepo';
 import type { Note } from '../../types';
 import { ImportedNote, contentHash, parseEnex, parseMarkdown, parseText } from './parsers';
+import { ZIP_LIMITS, planZipEntries } from './zipBudget';
 
 export interface ImportReport {
   imported: number;
@@ -28,14 +29,29 @@ function parseByName(name: string, content: string): ImportedNote[] {
 
 async function readZip(bytes: Uint8Array, report: ImportReport): Promise<{ name: string; notes: ImportedNote[] }[]> {
   const zip = await JSZip.loadAsync(bytes);
+  // Plan from declared sizes before inflating anything (zip-bomb guard).
+  const entries = Object.values(zip.files)
+    .filter((e) => !e.dir)
+    .map((e) => ({
+      name: e.name,
+      size: (e as unknown as { _data?: { uncompressedSize?: number } })._data?.uncompressedSize ?? Number.POSITIVE_INFINITY,
+      entry: e,
+    }));
+  const plan = planZipEntries(entries);
+  report.failed.push(...plan.rejected);
+
   const out: { name: string; notes: ImportedNote[] }[] = [];
-  for (const entry of Object.values(zip.files)) {
-    if (entry.dir || entry.name.startsWith('__MACOSX/') || /(^|\/)\./.test(entry.name)) continue;
-    if (!TEXT_EXT.test(entry.name) && !/\.enex$/i.test(entry.name)) continue;
+  for (const { name, entry } of plan.accepted) {
     try {
-      out.push({ name: entry.name, notes: parseByName(entry.name, await entry.async('string')) });
+      const content = await entry.async('string');
+      // Declared sizes can lie; check what actually came out.
+      if (content.length > ZIP_LIMITS.maxEntryBytes) {
+        report.failed.push({ name, reason: 'File is too large (over 10 MB)' });
+        continue;
+      }
+      out.push({ name, notes: parseByName(name, content) });
     } catch (error) {
-      report.failed.push({ name: entry.name, reason: 'Could not read this file' });
+      report.failed.push({ name, reason: error instanceof Error && /not supported/.test(error.message) ? error.message : 'Could not read this file' });
     }
   }
   return out;
@@ -49,6 +65,10 @@ export async function importFiles(assets: { uri: string; name: string }[]): Prom
     try {
       const file = new File(asset.uri);
       if (/\.zip$/i.test(asset.name)) {
+        if ((file.size ?? 0) > ZIP_LIMITS.maxArchiveBytes) {
+          report.failed.push({ name: asset.name, reason: 'Archive is larger than 100 MB' });
+          continue;
+        }
         for (const entry of await readZip(await file.bytes(), report)) parsed.push(...entry.notes);
       } else if (TEXT_EXT.test(asset.name) || /\.enex$/i.test(asset.name)) {
         if ((file.size ?? 0) > MAX_TEXT_BYTES) {
@@ -61,7 +81,10 @@ export async function importFiles(assets: { uri: string; name: string }[]): Prom
       }
     } catch (error) {
       console.warn('Import failed for', asset.name, error);
-      report.failed.push({ name: asset.name, reason: 'Could not read this file' });
+      report.failed.push({
+        name: asset.name,
+        reason: error instanceof Error && /not supported/.test(error.message) ? error.message : 'Could not read this file',
+      });
     }
   }
 

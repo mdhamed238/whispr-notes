@@ -149,22 +149,29 @@ export function enmlToText(html: string): string {
 }
 
 export function parseEnex(xml: string): ImportedNote[] {
+  const text = normalize(xml);
+  // Evernote exports never declare entities; a document that does could
+  // expand them exponentially ("billion laughs"), so it's refused outright.
+  if (/<!DOCTYPE\s[^>]*\[|<!ENTITY/i.test(text)) {
+    throw new Error('This .enex file uses XML features that are not supported');
+  }
   const parser = new XMLParser({
     ignoreAttributes: true,
     isArray: (name) => name === 'note' || name === 'tag',
     // Keep ENML intact; it's converted separately.
     stopNodes: ['*.content'],
-    processEntities: true,
+    // Standard entities are decoded by hand below; nothing is expanded by the parser.
+    processEntities: false,
   });
-  const doc = parser.parse(normalize(xml));
+  const doc = parser.parse(text);
   const notes: unknown[] = doc?.['en-export']?.note ?? [];
   return notes.map((raw) => {
     const n = raw as Record<string, unknown>;
     const content = String(n.content ?? '').replace(/^<!\[CDATA\[|\]\]>$/g, '');
     return {
-      title: String(n.title ?? '').trim() || 'Imported note',
+      title: decodeEntities(String(n.title ?? '')).trim() || 'Imported note',
       body: enmlToText(content),
-      tags: Array.isArray(n.tag) ? n.tag.map(String).filter(Boolean) : [],
+      tags: Array.isArray(n.tag) ? n.tag.map((t) => decodeEntities(String(t)).trim()).filter(Boolean) : [],
       createdAt: parseDate(n.created as string | undefined),
       updatedAt: parseDate(n.updated as string | undefined),
     };
