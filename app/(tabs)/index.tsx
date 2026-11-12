@@ -27,9 +27,11 @@ import { runHarness } from '@/services/transcriptionHarness';
 import { buildTimeline } from '@/services/transcriptionTimeline';
 import { WavFileWriter } from '@/services/wavEncoder';
 import { Note } from '@/types';
+import { haptic } from '@/services/haptics';
+import { useActionSheet } from '@/components/ui/ActionSheet';
+import { useToast } from '@/components/ui/Toast';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
-import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -112,6 +114,8 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
   // a new `style` prop and re-render anyway.
   const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
+  const sheet = useActionSheet();
+  const toast = useToast();
 
   // react-native-audio-api 0.13 moved buffer configuration off the
   // constructor and onto onAudioReady, so the recorder itself is now
@@ -207,6 +211,10 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
   // freshly-captured file with a null result.
   const isStoppingRef = useRef(false);
 
+  // Read through a ref by the once-registered interruption listener so it
+  // always sees the current recording state.
+  const interruptionHandlerRef = useRef<() => void>(() => {});
+
   const transcriptScrollRef = useRef<ScrollView>(null);
   const stickToBottomRef = useRef(true);
 
@@ -228,6 +236,14 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       iosMode: 'spokenAudio',
       // Renamed in react-native-audio-api 0.13 (was 'allowBluetooth').
       iosOptions: ['allowBluetoothHFP', 'defaultToSpeaker'],
+    });
+
+    // A phone call, alarm or another app taking the microphone ends the
+    // capture under us. Stop cleanly so the WAV is finalized and the take
+    // stays ready to save, instead of a recording that silently went dead.
+    AudioManager.observeAudioInterruptions(true);
+    const interruption = AudioManager.addSystemEventListener('interruption', (event) => {
+      if (event.type === 'began') interruptionHandlerRef.current();
     });
 
     // The options below are a *preference*, not a contract: 0.13 opens the
@@ -282,6 +298,9 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       console.error('Failed to register audio callback:', registration.message);
     }
 
+    return () => {
+      interruption?.remove();
+    };
     // Registered once per session (see the remount-key comment above), not
     // re-registered on every Start press.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -331,7 +350,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       // (double-buzzing alongside handleStopStreaming's own) and start was
       // silent. Both constraints are satisfied here — before start(), not
       // after stream().
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      await haptic('medium');
 
       // 0.13 made start() async and report failure through a Result instead
       // of throwing. Unchecked, a refused start would leave the model
@@ -437,13 +456,21 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
           : { audioUri: null, duration: 0 }
       );
 
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      void haptic('light');
     } catch (error) {
       console.error('Failed to stop streaming:', error);
     } finally {
       setIsCapturingAudio(false);
       isStoppingRef.current = false;
     }
+  };
+
+  interruptionHandlerRef.current = () => {
+    if (!isRecording) return;
+    void handleStopStreaming().then(() => {
+      void haptic('warning');
+      toast.show({ message: 'Recording stopped by an interruption. Save it or record again.', durationMs: 6000 });
+    });
   };
 
   /**
@@ -465,8 +492,14 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
 
     setIsFinishingTimeline(true);
     const pass = (async () => {
+      await notesRepo
+        .updateNote(saved.id, { enhancement: 'running', enhancementProgress: -1 })
+        .catch(() => undefined);
       const timeline = await buildTimeline(modelRef.current, audioUri);
-      if (!timeline) return;
+      if (!timeline) {
+        await notesRepo.updateNote(saved.id, { enhancement: 'failed', enhancementProgress: 0 }).catch(() => undefined);
+        return;
+      }
 
       try {
         // Compare-and-swap: the user reaches the saved note while this is
@@ -475,10 +508,9 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
         // that case the timeline is dropped too, since it would describe
         // words the user has already replaced.
         const stored = await notesRepo.getNote(saved.id);
-        const untouched =
-          stored?.transcription === saved.transcription && stored?.title === saved.title;
-
-        if (!untouched) return;
+        // An edit to the transcript made while this ran wins outright, and
+        // the timeline is dropped too since it describes replaced words.
+        if (!stored || stored.transcription !== saved.transcription) return;
 
         // Timings go to a sidecar file rather than onto the note — see
         // services/timelineStore.ts for why.
@@ -491,16 +523,22 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
         // better transcript. Taking it also keeps the stored text, the
         // timeline, listen mode and SRT in agreement.
         if (timeline.text) {
-          await notesRepo.updateNote(saved.id, {
-            transcription: timeline.text,
-            // The title was derived from the streamed text at save time, so
-            // it is regenerated from the same source as the text it now
-            // summarizes.
-            title: buildAutoTitle(timeline.text),
-          });
+          // Compare-and-swap on the version just read, so an edit landing
+          // between that read and this write is never overwritten. The title
+          // is regenerated only while it is still machine-written.
+          await notesRepo.updateNote(
+            saved.id,
+            {
+              transcription: timeline.text,
+              ...(stored.titleIsAuto ? { title: buildAutoTitle(timeline.text) } : {}),
+            },
+            { expectUpdatedAt: stored.updatedAt }
+          );
         }
       } catch (error) {
         console.warn('Failed to attach transcript timeline to note:', error);
+      } finally {
+        await notesRepo.updateNote(saved.id, { enhancement: 'done', enhancementProgress: 1 }).catch(() => undefined);
       }
     })();
 
@@ -579,21 +617,28 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       };
 
       await notesRepo.createNote(note);
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      void haptic('success');
 
       // The note is saved and the user moves on immediately — the timeline
       // is enrichment, not part of the save. It resolves onto the stored
       // note a few seconds later, and the note is perfectly usable without
       // it if the pass fails.
-      router.push('/notes');
+      router.push(`/note/${note.id}`);
       void runTimelinePass(note);
     } catch (error) {
       console.error('Failed to save note:', error);
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      void haptic('error');
       Alert.alert('Error', 'Failed to save note');
       setIsSaving(false);
     }
   };
+
+  const confirmReset = () =>
+    sheet.open({
+      title: 'Discard this recording?',
+      message: 'The audio and transcript will be deleted.',
+      actions: [{ label: 'Discard recording', icon: 'trash-outline', destructive: true, onPress: () => void handleReset() }],
+    });
 
   const handleReset = async () => {
     if (isRecording) {
@@ -753,7 +798,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
                     icon="refresh"
                     variant="secondary"
                     disabled={isSaving || isCapturingAudio || isFinishingTimeline}
-                    onPress={handleReset}
+                    onPress={confirmReset}
                     style={styles.resetButton}
                   />
                 </Animated.View>
