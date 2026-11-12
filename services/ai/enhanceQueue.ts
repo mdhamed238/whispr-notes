@@ -251,7 +251,8 @@ async function runEnhance(noteId: string, signal: AbortSignal): Promise<void> {
   // Only once the text it describes is the stored text.
   if (result.segments.length > 0) saveTimeline(noteId, result.segments);
 
-  if (peekSettings().autoSummarize && runners.summarize) {
+  // Summary or AI title next (the runner decides which, see summarizer).
+  if (runners.summarize) {
     await saveJob({ noteId, kind: 'summarize', state: 'pending', attempts: 0, createdAt: new Date().toISOString() });
   }
 }
