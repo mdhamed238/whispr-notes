@@ -34,3 +34,15 @@ describe('fallbackTitle', () => {
     expect(fallbackTitle('   ', now)).toBe('Note — Mar 1, 09:05');
   });
 });
+
+describe('CJK handling', () => {
+  const { countWords, chunkTranscript: chunk } = require('../../services/ai/prompts');
+  test('counts CJK characters as words', () => {
+    expect(countWords('我们今天讨论了第三季度的路线图')).toBeGreaterThanOrEqual(10);
+    expect(countWords('two words')).toBe(2);
+  });
+  test('CJK chunks stay within the token budget', () => {
+    const text = '我们讨论了路线图。'.repeat(600);
+    for (const c of chunk(text)) expect(c.length).toBeLessThanOrEqual(1500);
+  });
+});

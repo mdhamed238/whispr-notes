@@ -9,7 +9,7 @@ import JSZip from 'jszip';
 
 import * as notesRepo from '../db/notesRepo';
 import type { Note } from '../../types';
-import { ImportedNote, contentHash, parseEnex, parseMarkdown, parseText } from './parsers';
+import { ImportedNote, contentHash, detectImportKind, parseEnex, parseMarkdown, parseText } from './parsers';
 import { ZIP_LIMITS, planZipEntries } from './zipBudget';
 import { readEntryBounded } from './zipRead';
 
@@ -72,21 +72,36 @@ export async function importFiles(assets: { uri: string; name: string }[]): Prom
   for (const asset of assets) {
     try {
       const file = new File(asset.uri);
-      if (/\.zip$/i.test(asset.name)) {
-        if ((file.size ?? 0) > ZIP_LIMITS.maxArchiveBytes) {
+      // Android content:// URIs often carry no extension, so peek at the
+      // first bytes when the name doesn't say what the file is.
+      let kind = detectImportKind(asset.name, '');
+      const named = /\.[a-z0-9]+$/i.test(asset.name);
+      let bytes: Uint8Array | null = null;
+      if (!named || kind === 'txt') {
+        bytes = await file.bytes();
+        const head = Array.from(bytes.subarray(0, 512), (b) => String.fromCharCode(b)).join('');
+        kind = named ? kind : detectImportKind(asset.name, head);
+      }
+      if (!kind || (named && !/\.(md|markdown|txt|text|enex|zip)$/i.test(asset.name))) {
+        report.failed.push({ name: asset.name, reason: 'Unsupported file type' });
+        continue;
+      }
+      const size = bytes?.length ?? file.size ?? 0;
+      if (kind === 'zip') {
+        if (size > ZIP_LIMITS.maxArchiveBytes) {
           report.failed.push({ name: asset.name, reason: 'Archive is larger than 100 MB' });
           continue;
         }
-        for (const entry of await readZip(await file.bytes(), report)) parsed.push(...entry.notes);
-      } else if (TEXT_EXT.test(asset.name) || /\.enex$/i.test(asset.name)) {
-        if ((file.size ?? 0) > MAX_TEXT_BYTES) {
-          report.failed.push({ name: asset.name, reason: 'File is larger than 10 MB' });
-          continue;
-        }
-        parsed.push(...parseByName(asset.name, await file.text()));
-      } else {
-        report.failed.push({ name: asset.name, reason: 'Unsupported file type' });
+        for (const entry of await readZip(bytes ?? (await file.bytes()), report)) parsed.push(...entry.notes);
+        continue;
       }
+      if (size > MAX_TEXT_BYTES) {
+        report.failed.push({ name: asset.name, reason: 'File is larger than 10 MB' });
+        continue;
+      }
+      const text = await file.text();
+      const parseName = named ? asset.name : `${asset.name}.${kind}`;
+      parsed.push(...parseByName(parseName, text));
     } catch (error) {
       console.warn('Import failed for', asset.name, error);
       report.failed.push({

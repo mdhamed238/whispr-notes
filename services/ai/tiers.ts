@@ -11,9 +11,10 @@ export type LlmId = 'qwen3-1.7b' | 'qwen3-0.6b';
 
 const GiB = 2 ** 30;
 // Phones report less RAM than marketed (kernel and carve-outs): an "8 GB"
-// Galaxy S23 shows ~7.3 GiB and a "6 GB" phone ~5.5 GiB. Thresholds sit
+// Galaxy S23 shows ~7.3 GiB, some 8 GB phones under 7, and a "6 GB" phone
+// ~5.5 GiB. Thresholds sit
 // below those so each marketed class lands in its intended tier.
-const FLAGSHIP_MIN_BYTES = 7.0 * GiB;
+const FLAGSHIP_MIN_BYTES = 6.5 * GiB;
 const STANDARD_MIN_BYTES = 5.0 * GiB;
 
 export function resolveTier(d: {

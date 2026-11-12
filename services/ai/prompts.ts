@@ -6,6 +6,22 @@ import type { Message } from 'react-native-executorch/legacy';
 
 /** ~1000 tokens: leaves room for instructions and output in a 4k context. */
 export const LLM_CHUNK_CHARS = 4000;
+/** Scripts without spaces run about one token per character. */
+export const LLM_CHUNK_CHARS_CJK = 1500;
+
+const CJK = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff]/g;
+
+/** Words for spaced scripts; each CJK character counts as one. */
+export function countWords(text: string): number {
+  const cjk = text.match(CJK)?.length ?? 0;
+  const rest = text.replace(CJK, ' ').trim();
+  return cjk + (rest ? rest.split(/\s+/).length : 0);
+}
+
+function isMostlyCjk(text: string): boolean {
+  const cjk = text.match(CJK)?.length ?? 0;
+  return cjk > 0 && cjk / Math.max(1, text.replace(/\s/g, '').length) > 0.3;
+}
 
 const FORMAT = `Reply in Markdown with exactly these sections:
 ## Title
@@ -56,12 +72,13 @@ export function buildTitleMessages(text: string): Message[] {
 }
 
 /** Splits on sentence boundaries; a sentence longer than the limit is split by words. */
-export function chunkTranscript(text: string, maxChars = LLM_CHUNK_CHARS): string[] {
+export function chunkTranscript(text: string, maxCharsArg?: number): string[] {
   const clean = text.replace(/\s+/g, ' ').trim();
   if (!clean) return [];
+  const maxChars = maxCharsArg ?? (isMostlyCjk(clean) ? LLM_CHUNK_CHARS_CJK : LLM_CHUNK_CHARS);
   if (clean.length <= maxChars) return [clean];
 
-  const sentences = clean.match(/[^.!?…]+[.!?…]+["')\]]*\s*|[^.!?…]+$/g) ?? [clean];
+  const sentences = clean.match(/[^.!?…。！？]+[.!?…。！？]+["')\]」]*\s*|[^.!?…。！？]+$/g) ?? [clean];
   const pieces: string[] = [];
   for (const s of sentences) {
     const sentence = s.trim();
@@ -70,12 +87,15 @@ export function chunkTranscript(text: string, maxChars = LLM_CHUNK_CHARS): strin
       continue;
     }
     let buffer = '';
-    for (const word of sentence.split(' ')) {
-      if (buffer && buffer.length + 1 + word.length > maxChars) {
+    // Unspaced scripts split by character, everything else by word.
+    const units = sentence.includes(' ') ? sentence.split(' ') : Array.from(sentence);
+    const sep = sentence.includes(' ') ? ' ' : '';
+    for (const word of units) {
+      if (buffer && buffer.length + sep.length + word.length > maxChars) {
         pieces.push(buffer);
         buffer = word;
       } else {
-        buffer = buffer ? `${buffer} ${word}` : word;
+        buffer = buffer ? `${buffer}${sep}${word}` : word;
       }
     }
     if (buffer) pieces.push(buffer);

@@ -13,6 +13,27 @@ export interface ImportedNote {
   updatedAt: Date | null;
 }
 
+export type ImportKind = 'md' | 'txt' | 'enex' | 'zip';
+
+/**
+ * File type from the name, or by sniffing the first bytes when the name has
+ * no extension (Android content:// URIs often don't). Null for binary data.
+ */
+export function detectImportKind(name: string, head: string): ImportKind | null {
+  const ext = name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];
+  if (ext === 'md' || ext === 'markdown') return 'md';
+  if (ext === 'txt' || ext === 'text') return 'txt';
+  if (ext === 'enex') return 'enex';
+  if (ext === 'zip') return 'zip';
+  if (head.startsWith('PK\u0003\u0004')) return 'zip';
+  const start = head.replace(/^\uFEFF/, '').slice(0, 512);
+  if (/<en-export[\s>]/.test(start)) return 'enex';
+  // Control characters other than whitespace mean binary.
+  if (/[\u0000-\u0008\u000E-\u001F]/.test(start)) return null;
+  if (/^(---\n|#{1,6}\s)/.test(start.replace(/\r\n?/g, '\n'))) return 'md';
+  return 'txt';
+}
+
 function normalize(content: string): string {
   return content.replace(/^﻿/, '').replace(/\r\n?/g, '\n');
 }

@@ -24,6 +24,21 @@ export interface Settings {
   failedEngines: string[];
 }
 
+/**
+ * Settings after "Delete all data": preferences go back to defaults, but the
+ * purchase entitlement and the free-summary log (timestamps only, no
+ * content) are kept so neither a paying user loses Pro nor the quota resets.
+ */
+export function settingsAfterDataReset(current: Settings): Settings {
+  return {
+    ...DEFAULT_SETTINGS,
+    onboardingCompleted: true,
+    proCache: current.proCache,
+    summaryLog: current.summaryLog,
+    devProOverride: current.devProOverride,
+  };
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   hapticsEnabled: true,
   tierOverride: null,

@@ -98,3 +98,22 @@ describe('import safety', () => {
     expect(() => parseEnex(bomb)).toThrow(/not supported/i);
   });
 });
+
+describe('detectImportKind', () => {
+  const { detectImportKind } = require('../../services/import/parsers');
+  test('uses the extension when there is one', () => {
+    expect(detectImportKind('a.md', '')).toBe('md');
+    expect(detectImportKind('a.ENEX', '')).toBe('enex');
+    expect(detectImportKind('a.zip', '')).toBe('zip');
+  });
+  test('sniffs content when the name has no extension (Android content URIs)', () => {
+    expect(detectImportKind('msf:1000001234', 'PK\u0003\u0004rest')).toBe('zip');
+    expect(detectImportKind('0', '<?xml version="1.0"?>\n<en-export>')).toBe('enex');
+    expect(detectImportKind('0', '---\ntitle: x\n---\nbody')).toBe('md');
+    expect(detectImportKind('0', '# Heading\ntext')).toBe('md');
+    expect(detectImportKind('0', 'Just some text')).toBe('txt');
+  });
+  test('binary junk is unsupported', () => {
+    expect(detectImportKind('photo', '\u0000\u0001\u0002JFIF')).toBeNull();
+  });
+});

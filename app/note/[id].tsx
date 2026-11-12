@@ -96,14 +96,26 @@ export default function NoteDetailScreen() {
   useEffect(() => {
     if (!note) return;
     const synced = syncedRef.current;
-    if (!synced || title === synced.title) setTitle(note.title);
-    if (!synced || transcription === synced.transcription) setTranscription(note.transcription);
+    const transcriptDirty = Boolean(synced) && transcription !== synced!.transcription;
+    // Compare trimmed: autosave stores the trimmed title, and re-applying it
+    // while the user is still typing would eat a trailing space.
+    if (!synced || (title.trim() || 'Untitled note') === (synced.title.trim() || 'Untitled note')) {
+      if (note.title !== (title.trim() || 'Untitled note')) setTitle(note.title);
+    }
+    if (!synced || !transcriptDirty) {
+      setTranscription(note.transcription);
+    } else if (timeline && id) {
+      // Background text landed while the user was editing: their edit will
+      // win when it saves, so timings for the other text must go.
+      setTimeline(null);
+      deleteTimeline(id);
+    }
     setTags(note.tags);
     syncedRef.current = { title: note.title, transcription: note.transcription };
     // Open on the summary once one exists for this note.
     if (!synced && note.summary) setTab('summary');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [note]);
+  }, [note, timeline]);
 
   // Hoisted so the timestamped transcript can drive the same player.
   const player = useAudioPlayer(note?.audioUri ?? null, { updateInterval: PLAYBACK_UPDATE_INTERVAL_MS });
@@ -168,6 +180,8 @@ export default function NoteDetailScreen() {
 
   const handleTranscriptionChange = (text: string) => {
     setTranscription(text);
+    // Typing means editing: don't flip to listen mode if timings arrive.
+    setMode('edit');
     // A timeline describes the audio, not the text: once the transcript is
     // hand-edited the two disagree, so the timings are dropped rather than
     // ever showing stale words. SRT falls back to a single cue.
@@ -254,8 +268,12 @@ export default function NoteDetailScreen() {
       void haptic('success');
       setTab('summary');
     } catch (error) {
+      if (summarizer.isStopped(error)) return;
       console.warn('Summary failed:', error);
-      toast.show({ message: 'Could not write a summary. Try again.', tone: 'error' });
+      toast.show({
+        message: error instanceof Error && /free summaries/.test(error.message) ? error.message : 'Could not write a summary. Try again.',
+        tone: 'error',
+      });
     }
   };
 
@@ -267,6 +285,7 @@ export default function NoteDetailScreen() {
       await summarizer.generateTitle(note.id, true);
       void haptic('success');
     } catch (error) {
+      if (summarizer.isStopped(error)) return;
       console.warn('Title failed:', error);
       toast.show({ message: 'Could not write a title. Try again.', tone: 'error' });
     }

@@ -14,7 +14,7 @@ import { summaryAllowance } from '../billing/quota';
 import { peekSettings, updateSettings } from '../settings';
 import { detectTier } from './device';
 import { registerJobRunner } from './enhanceQueue';
-import { buildMergeMessages, buildSummaryMessages, buildTitleMessages, chunkTranscript } from './prompts';
+import { buildMergeMessages, buildSummaryMessages, buildTitleMessages, chunkTranscript, countWords } from './prompts';
 import { cleanTitle, parseSummaryResponse, stripThinking } from './summaryParser';
 import { chooseLlm, type LlmId } from './tiers';
 
@@ -60,6 +60,23 @@ let tokenSink: ((token: string) => void) | null = null;
 let idleTimer: ReturnType<typeof setTimeout> | null = null;
 let lock: Promise<unknown> = Promise.resolve();
 let activeNoteId: string | null = null;
+// Set by stop(): interrupt() makes generate() return the partial text
+// normally, so every step checks this before using its output.
+let interrupted = false;
+
+class StoppedError extends Error {
+  constructor() {
+    super('Stopped');
+  }
+}
+
+function throwIfStopped() {
+  if (interrupted) throw new StoppedError();
+}
+
+export function isStopped(error: unknown): boolean {
+  return error instanceof StoppedError;
+}
 
 /** Serializes LLM use; the native module can only run one generation. */
 function withLlm<T>(task: () => Promise<T>): Promise<T> {
@@ -117,26 +134,30 @@ async function generate(module: LLMModule, noteId: string, messages: Message[]):
 
 /** Stops the generation running for this note, if any. */
 export function stop(noteId: string): void {
-  if (activeNoteId === noteId) llm?.module.interrupt();
+  if (activeNoteId !== noteId) return;
+  interrupted = true;
+  llm?.module.interrupt();
 }
 
-function wordCount(text: string): number {
-  return text.trim() ? text.trim().split(/\s+/).length : 0;
-}
+const wordCount = countWords;
 
 /**
  * Writes a full summary (and, while the title is still machine-written, an
  * AI title). Throws when there's too little text to summarize.
  */
-export async function summarize(noteId: string): Promise<void> {
-  const note = await notesRepo.getNote(noteId);
-  if (!note) return;
-  if (wordCount(note.transcription) < MIN_WORDS_FOR_SUMMARY) {
-    throw new Error('Too short to summarize');
-  }
-
+export async function summarize(noteId: string, o: { onlyIfMissing?: boolean } = {}): Promise<void> {
   await withLlm(async () => {
+    // Read inside the lock: another run may have just written a summary or
+    // used the last free one while this waited.
+    const note = await notesRepo.getNote(noteId);
+    if (!note) return;
+    if (o.onlyIfMissing && note.summary) return;
+    if (wordCount(note.transcription) < MIN_WORDS_FOR_SUMMARY) throw new Error('Too short to summarize');
+    if (!summaryAllowance(peekSettings().summaryLog, new Date(), isProNow()).allowed) {
+      throw new Error('No free summaries left this week');
+    }
     activeNoteId = noteId;
+    interrupted = false;
     try {
       const module = await getLlm(noteId);
       const chunks = chunkTranscript(note.transcription);
@@ -144,14 +165,18 @@ export async function summarize(noteId: string): Promise<void> {
       if (chunks.length === 1) {
         setState(noteId, { phase: 'summarizing', partial: '', step: null });
         raw = await generate(module, noteId, buildSummaryMessages(chunks[0], 'single'));
+        throwIfStopped();
       } else {
         const partials: string[] = [];
         for (let i = 0; i < chunks.length; i++) {
           setState(noteId, { phase: 'summarizing', partial: '', step: { index: i + 1, total: chunks.length } });
-          partials.push(stripThinking(await generate(module, noteId, buildSummaryMessages(chunks[i], 'partial'))));
+          const part = await generate(module, noteId, buildSummaryMessages(chunks[i], 'partial'));
+          throwIfStopped();
+          partials.push(stripThinking(part));
         }
         setState(noteId, { phase: 'merging', partial: '', step: null });
         raw = await generate(module, noteId, buildMergeMessages(partials));
+        throwIfStopped();
       }
 
       const { title, summary } = parseSummaryResponse(raw, llm?.id ?? 'unknown', new Date());
@@ -167,6 +192,7 @@ export async function summarize(noteId: string): Promise<void> {
       await updateSettings({ summaryLog: [...peekSettings().summaryLog, new Date().toISOString()].slice(-50) });
     } finally {
       activeNoteId = null;
+      interrupted = false;
       setState(noteId, { phase: 'idle' });
       scheduleUnload();
     }
@@ -175,20 +201,24 @@ export async function summarize(noteId: string): Promise<void> {
 
 /** AI title only. Free for everyone; leaves user-written titles alone unless `force`. */
 export async function generateTitle(noteId: string, force = false): Promise<void> {
-  const note = await notesRepo.getNote(noteId);
-  if (!note || (!note.titleIsAuto && !force) || wordCount(note.transcription) < 4) return;
   await withLlm(async () => {
+    const note = await notesRepo.getNote(noteId);
+    if (!note || (!note.titleIsAuto && !force) || wordCount(note.transcription) < 4) return;
     activeNoteId = noteId;
+    interrupted = false;
     try {
       const module = await getLlm(noteId);
       setState(noteId, { phase: 'titling', partial: '' });
-      const title = cleanTitle(stripThinking(await generate(module, noteId, buildTitleMessages(note.transcription))).split('\n')[0] ?? '');
+      const raw = await generate(module, noteId, buildTitleMessages(note.transcription));
+      throwIfStopped();
+      const title = cleanTitle(stripThinking(raw).split('\n')[0] ?? '');
       const latest = await notesRepo.getNote(noteId);
       if (title && latest && (latest.titleIsAuto || force)) {
         await notesRepo.updateNote(noteId, { title, titleIsAuto: true });
       }
     } finally {
       activeNoteId = null;
+      interrupted = false;
       setState(noteId, { phase: 'idle' });
       scheduleUnload();
     }
@@ -207,7 +237,7 @@ async function autoProcess(noteId: string): Promise<void> {
   const wantsSummary =
     peekSettings().autoSummarize && allowance.allowed && !note.summary && wordCount(note.transcription) >= MIN_WORDS_FOR_SUMMARY;
   try {
-    if (wantsSummary) await summarize(noteId);
+    if (wantsSummary) await summarize(noteId, { onlyIfMissing: true });
     else await generateTitle(noteId);
   } catch (error) {
     // Auto work is best-effort; the note is complete without it.

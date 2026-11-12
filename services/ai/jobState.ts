@@ -13,6 +13,21 @@ export interface Job {
   createdAt: string;
 }
 
+/**
+ * Load failures caused by the network (a model still downloading) are
+ * temporary; only real load failures (memory, corrupt model) should make
+ * the queue give up on an engine for good.
+ */
+export function isTransientEngineError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /network|download|offline|internet|timed? ?out|connection|socket|unreachable|host/i.test(message);
+}
+
+/** A note restored by Undo must not claim work is still running for it. */
+export function restoredEnhancement<T extends string>(state: T): T | 'none' {
+  return state === 'pending' || state === 'running' ? 'none' : state;
+}
+
 /** A job that crashed the app this many times is given up on. */
 export const MAX_ATTEMPTS = 3;
 
