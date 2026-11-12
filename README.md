@@ -1,128 +1,90 @@
-# Audio Transcription App
+<p align="center"><img src="assets/brand/logo-1024.png" width="96" alt="WhisprNotes logo"></p>
 
-An Expo / React Native app that records speech and transcribes it **on-device** in real time using OpenAI's Whisper (Base, English) via [`react-native-executorch`](https://github.com/software-mansion/react-native-executorch). No audio ever leaves the phone.
+# WhisprNotes
 
-## Screenshots
-
-| Record | Notes | First launch |
-|:---:|:---:|:---:|
-| <img src="docs/screenshots/record.webp" alt="Record screen, ready to transcribe" width="240"> | <img src="docs/screenshots/notes.webp" alt="Notes screen with search" width="240"> | <img src="docs/screenshots/loading.webp" alt="Whisper model downloading on first launch" width="240"> |
-| Tap to record — live transcript below | Search notes by title, text, or tag | Models download once, then cached |
+Private voice notes and meeting summaries, transcribed **on your phone**. Live Whisper transcription while you speak, Whisper Large-v3 Turbo accuracy after you stop, and AI summaries with key points, action items and decisions. No account, no cloud, no tracking.
 
 ## Features
 
-- **Live streaming transcription** — audio is captured in 100 ms chunks and streamed straight into the Whisper model as you speak, with committed and in-progress (interim) text shown separately. The transcript auto-scrolls as text arrives, unless you've scrolled up to read back.
-- **Voice-activity gating** — an FSMN VAD model commits text once it detects ~300 ms of silence, rather than continuously re-transcribing a growing buffer. This is what keeps commit latency down.
-- **On-device inference** — runs fully offline through ExecuTorch; no server, no API keys, no network calls.
-- **Notes** — recordings are saved as editable notes: title, transcript, and freeform tags, all editable after the fact. Pin the ones you want to keep at the top.
-- **Audio playback** — the raw PCM is streamed to a real WAV file on disk while you record, so every note keeps its actual audio for playback.
-- **Long recordings** — because audio goes straight to disk instead of accumulating in memory, recording length is bounded by free space rather than the JS heap. The cap is currently 1 hour (~115 MB of WAV), and it's a runaway guard, not a technical limit.
-- **Search** — filter notes by title, transcript text, or tag.
-- **Export & share** — export any note as `.txt`, `.json`, or `.srt` and share it through the native share sheet.
-- **Haptic feedback** on start/stop/save for a more tactile recording experience.
+- **Live transcript** as you speak (Whisper Base EN + VAD, ExecuTorch).
+- **Enhanced transcript** after recording: Whisper **Large-v3 Turbo** (whisper.cpp) on flagship phones, Whisper Small on mid-range, Base on the rest. Word-level timings: tap any word to replay it. 99 languages with Large-v3.
+- **AI summaries and titles**, on-device (Qwen3 1.7B / 0.6B via ExecuTorch): overview, key points, action items, decisions. Long meetings are summarized in parts and merged.
+- **Notes**: full-text search (SQLite FTS5) across transcripts, summaries and tags; tag filters; sort; swipe to pin or delete with undo; long-press menu.
+- **Player**: real waveform, scrubbing, ±15 s, playback speed.
+- **Export & share**: branded PDF, Markdown (with front matter and task checkboxes), text, SRT subtitles, original audio; summary-only or full; optional timestamps. One-tap Markdown zip backup of everything.
+- **Import**: Markdown, text, Evernote `.enex`, and `.zip` exports from Notion, Obsidian or Bear. "Open in WhisprNotes" from other apps. Duplicates skipped.
+- **Insights**: minutes recorded, words, streaks, speaking pace, typing time saved, 14-day chart, time-of-day heatmap, top tags. Computed on the phone.
+- **Pro** (RevenueCat): monthly, yearly with trial, or lifetime. Free tier: unlimited recording, AI titles, 3 summaries a week, text export.
+- **Trust**: onboarding that explains the one-time model downloads, bundled Privacy Policy, Terms and "What's stored" pages, delete-all-data.
+- **Feel**: consistent haptics (toggleable), toasts with undo, bottom sheets, native transitions, reduced-motion support, light and dark themes.
+
+## Device tiers
+
+Detected from RAM at launch (phones report less than marketed, so the thresholds sit below the marketed sizes). Users can override in Settings → AI models.
+
+| Tier | Detected RAM | Final transcript (Pro) | Summaries |
+|---|---|---|---|
+| Flagship (e.g. Galaxy S23 Ultra) | ≥ 7 GiB | Whisper Large-v3 Turbo, q5_0, ~574 MB | Qwen3 1.7B |
+| Standard | 5–7 GiB | Whisper Small (multilingual) | Qwen3 0.6B |
+| Lite | < 5 GiB, or 32-bit Android | Whisper Base EN | Qwen3 0.6B |
+
+Free users get the Base pass (word timings, cleaner text) on every tier. If a model fails to load, the app falls back one tier and remembers it. Large-v3 Turbo is downloaded on request (Settings → AI models); until then Pro uses Small.
+
+**Performance:** measure on device and record here (realtime factor of the Turbo pass on an S23 Ultra, summary time for a 30-minute meeting).
+
+## Architecture
+
+```
+app/                         expo-router screens
+  (tabs)/index.tsx           Record: live streaming transcription, WAV to disk
+  (tabs)/notes.tsx           Notes: FTS search, tags, sort, swipe, undo
+  (tabs)/insights.tsx        Insights
+  (tabs)/settings.tsx        Settings
+  note/[id].tsx              Note: player, summary, transcript, export
+  paywall.tsx, onboarding.tsx, models.tsx, import.tsx, legal/[doc].tsx
+  +native-intent.tsx         Routes files opened from other apps to import
+services/
+  db/                        SQLite schema/migrations, notes repo (+change events, CAS)
+  ai/                        tiers, model manager, engines (whisper.rn, ExecuTorch),
+                             persistent job queue, summarizer, prompts/parser
+  export/                    generators (txt, md, srt), PDF template, exporter, backup
+  import/                    parsers (md, txt, enex), zip budget, importer, incoming-URI guard
+  insights/stats.ts          on-device statistics
+  billing/                   RevenueCat purchases, plans, free quota
+  settings*.ts, haptics.ts, wavEncoder.ts, waveform*.ts, timelineStore.ts
+components/                  UI kit (Toast, ActionSheet, SwipeableRow, …), charts, brand
+content/legal/               Privacy, Terms, What's stored (Markdown; `yarn legal` embeds them)
+website/                     Marketing + legal site (`yarn website`)
+```
+
+Key decisions:
+
+- **SQLite, not AsyncStorage.** The old store rewrote the whole notes array on every change and could drop concurrent writes. Writes are now single statements; background results use compare-and-swap so a user's edit always wins.
+- **Background work is a persistent queue** (`services/ai/enhanceQueue.ts`). It resumes after the app is killed, waits while recording, and runs one heavy model at a time.
+- **Transcription imports come from `react-native-executorch/legacy`**: the 0.10 root API has no word timestamps.
+- **Native modules are pinned** (executorch, audio-api, worklets, whisper.rn, purchases). After any native dependency change, rebuild the dev client.
 
 ## Requirements
 
-This app **must run on a physical iOS or Android device** — simulators/emulators aren't supported.
-
-| | |
-|---|---|
-| Node.js | 18+ |
-| Package manager | Yarn — `yarn.lock` is the committed lockfile |
-| iOS | Physical device, iOS 17+ |
-| Android | Physical device, Android 7.0+ (API 24), **arm64-v8a required** |
-| Free storage | ~600 MB (models are downloaded at runtime, not bundled) |
-| Expo CLI | via `npx expo` (no global install needed) |
-
-> **arm64-v8a is not optional on Android.** ExecuTorch ships its runtime for 64-bit ARM only — `libexecutorch.so` is absent from the `armeabi-v7a`, `x86`, and `x86_64` slices. On a 32-bit device the app installs and opens but transcription can never become ready (the library reports `isAvailable === false`).
-
-On-device model inference (`react-native-executorch`) and real-time audio capture (`react-native-audio-api`) both need native hardware, so this is a [dev client](https://docs.expo.dev/develop/development-builds/introduction/) build, not Expo Go.
-
-> **Native modules are pinned to exact versions on purpose** (`react-native-executorch`, `react-native-audio-api`, `react-native-worklets`, and the executorch resource fetcher). A floating `^` range lets the JS tree drift away from whatever native code the dev client was compiled with, which surfaces as *"package doesn't seem to be linked"* or *"Mismatch between JavaScript part and native part"*. **After any native dependency change, rebuild the dev client** — a JS reload is not enough.
->
-> **Transcription imports come from `react-native-executorch/legacy`, deliberately.** executorch 0.10 reorganised its public API, and the new root entry point returns plain strings from `transcribe()`/`stream()` with no `verbose` option — no segments, no word timestamps. Note timelines (tap-a-word playback, multi-cue SRT) depend on those, so the app stays on the legacy entry point until the new API exposes timings. The same applies to `react-native-executorch-expo-resource-fetcher/legacy`.
-
-## Getting Started
+Physical device only. iOS 17+, or Android 7+ on arm64-v8a. Node 18+, Yarn.
 
 ```bash
-git clone https://github.com/mdhamed238/audio-transcription-app.git
-cd audio-transcription-app
 yarn install
-
-# build & run a development client on a connected device
-yarn ios       # iOS device
-yarn android   # Android device
+yarn ios        # or: yarn android   (dev client build)
+yarn test       # unit tests (Jest)
+yarn typecheck
 ```
 
-On first launch the models download and initialize — Whisper Base EN is ~380 MB and the VAD ~2 MB, so give it a minute on a slow connection. This happens once; they're cached on disk afterwards.
+## Before you ship
 
-## How It Works
-
-1. `AudioRecorder` (`react-native-audio-api`) captures 16kHz mono audio and streams 100ms buffers as they're recorded.
-2. Each buffer is pushed into the model via `useSpeechToText().streamInsert()` — no need to wait for the recording to finish.
-3. The same buffer is appended to a WAV file on disk (`services/wavEncoder.ts`) and reduced to an RMS level that drives the on-screen waveform.
-4. `model.stream({ useVAD: true })` yields `{ committed, nonCommitted }` as it decodes; the screen accumulates the committed text and renders the non-committed tail in grey.
-5. On stop, the WAV's 44-byte header is patched with the final length — there's no encode pass, so stopping is instant regardless of recording length.
-6. The Notes tab lists saved notes; tap one to edit its title/transcript/tags, play back the audio, export, or delete it.
-
-## Project Structure
-
-```
-app/
-├── _layout.tsx              # Root stack, font loading, initExecutorch() setup
-├── note/[id].tsx             # Note Detail modal — edit, tags, pin, playback, export, delete
-└── (tabs)/
-    ├── _layout.tsx           # Tab navigator (Record / Notes)
-    ├── index.tsx             # Record screen — capture + live transcription
-    └── notes.tsx              # Notes screen — search, pinned section, cards
-
-components/ui/               # Button, Card, Chip, TextField, EmptyState, Skeleton, …
-
-services/
-├── storageService.ts        # AsyncStorage persistence, export (txt/json/srt), sharing
-└── wavEncoder.ts              # Streaming WAV writer — appends PCM to disk as it records
-
-constants/
-├── config.ts                 # Audio, storage, and export configuration
-├── Colors.ts                  # Light/dark theme tokens
-└── Spacing.ts                 # Shared spacing/font-size scale
-
-types/
-└── index.ts                  # Shared TypeScript types
-```
-
-## Tech Stack
-
-- [Expo SDK 57](https://expo.dev) / React Native 0.86 / React 19
-- [expo-router](https://docs.expo.dev/router/introduction/) for file-based navigation
-- [`react-native-executorch`](https://github.com/software-mansion/react-native-executorch) — on-device Whisper Base (EN) inference + FSMN voice-activity detection
-- [`react-native-audio-api`](https://github.com/software-mansion/react-native-audio-api) — low-level streaming audio capture
-- [`expo-audio`](https://docs.expo.dev/versions/latest/sdk/audio/) — note playback
-- TypeScript, `@react-native-async-storage/async-storage`, `expo-sharing`, `expo-haptics`
-
-## Building
-
-Native builds are managed with [EAS](https://docs.expo.dev/eas/) via the included `Makefile`:
-
-```bash
-make preview-ios       # preview build, iOS
-make dev-android       # development build, Android
-make build MODE=production PLATFORM=all
-```
-
-## Known Limitations
-
-- **English only** — uses the fixed Whisper Base EN model. Multilingual (EN/FR/AR) was implemented against `whisper_base()` and reverted: it throws `[Whisper] The 'decode' method did not succeed` on device. Neither a corrupt download nor a tokenizer gap explains it — cause still unknown. See the comment above the `useSpeechToText` call in `app/(tabs)/index.tsx` for how to re-enable it.
-- **CPU-only inference on Android** — Whisper runs through XNNPACK. No NPU or GPU backend exists for it at `react-native-executorch` 0.9.3, so speed tracks CPU single-thread performance.
-- **Models are never evicted** — the resource fetcher caches by URL with no cleanup, so switching models leaves the old weights on disk permanently.
-- **32-bit Android is unsupported** — and the app currently shows an indefinite loading state there rather than explaining why.
-- **Device-only** — no simulator/emulator or web fallback for recording/transcription.
-- **No automated tests configured** — no test runner is wired up in `package.json` yet.
-
-## Status
-
-Core loop — record, transcribe live, save, review, export — is implemented and working end to end on-device. Treat this as an actively-developed personal project rather than a polished release: expect rough edges around error states and no CI yet.
+1. **RevenueCat:** create the project; entitlement `pro`; products `whisprnotes_pro_monthly`, `whisprnotes_pro_yearly` (with intro trial), `whisprnotes_pro_lifetime`; an offering with monthly/annual/lifetime packages. Put the public SDK keys in `app.json` → `expo.extra.revenueCat`.
+2. **Website:** `yarn website`, then from `website/`: `vercel link --project whisprnotes && vercel deploy --prod`. Use the Privacy and Terms URLs in both store listings.
+3. **Legal:** fill in the governing-law country and have the documents reviewed (see `docs/legal/README.md`).
+4. **Stores:** copy and privacy answers in `docs/store/listing.md`.
+   - Apple: Individual developer account ($99/yr). Paid Apps agreement, banking and tax forms. To sell in the EU you must declare trader status, which shows your address and phone on the App Store.
+   - Google Play: personal account ($25). New personal accounts must run a closed test with at least 12 testers for 14 days before production.
+5. **Measure** Turbo speed and summary time on a flagship and update this README.
 
 ## License
 
-No license file yet — all rights reserved by default until one is added.
+All rights reserved.
