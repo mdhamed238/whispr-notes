@@ -11,6 +11,7 @@ import * as notesRepo from '../db/notesRepo';
 import type { Note } from '../../types';
 import { ImportedNote, contentHash, parseEnex, parseMarkdown, parseText } from './parsers';
 import { ZIP_LIMITS, planZipEntries } from './zipBudget';
+import { readEntryBounded } from './zipRead';
 
 export interface ImportReport {
   imported: number;
@@ -41,17 +42,24 @@ async function readZip(bytes: Uint8Array, report: ImportReport): Promise<{ name:
   report.failed.push(...plan.rejected);
 
   const out: { name: string; notes: ImportedNote[] }[] = [];
+  // Declared sizes can lie, so the real bound is enforced while inflating:
+  // per entry, and against what's left of the archive's total budget.
+  let inflated = 0;
   for (const { name, entry } of plan.accepted) {
+    const remaining = ZIP_LIMITS.maxTotalBytes - inflated;
+    if (remaining <= 0) {
+      report.failed.push({ name, reason: 'Archive is over the 50 MB import limit' });
+      continue;
+    }
     try {
-      const content = await entry.async('string');
-      // Declared sizes can lie; check what actually came out.
-      if (content.length > ZIP_LIMITS.maxEntryBytes) {
-        report.failed.push({ name, reason: 'File is too large (over 10 MB)' });
-        continue;
-      }
+      const content = await readEntryBounded(entry, Math.min(ZIP_LIMITS.maxEntryBytes, remaining));
+      inflated += content.length;
       out.push({ name, notes: parseByName(name, content) });
     } catch (error) {
-      report.failed.push({ name, reason: error instanceof Error && /not supported/.test(error.message) ? error.message : 'Could not read this file' });
+      report.failed.push({
+        name,
+        reason: error instanceof Error && /not supported|too large/.test(error.message) ? error.message : 'Could not read this file',
+      });
     }
   }
   return out;
