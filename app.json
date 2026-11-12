@@ -8,11 +8,6 @@
     "scheme": "whisprnotes",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/images/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#FF6A4D"
-    },
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
@@ -41,6 +36,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
+        "monochromeImage": "./assets/images/adaptive-icon-monochrome.png",
         "backgroundColor": "#FF6A4D"
       },
       "edgeToEdgeEnabled": true,
@@ -129,7 +125,19 @@
       "expo-asset",
       "@react-native-community/datetimepicker",
       "expo-font",
-      "expo-splash-screen",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 180,
+          "resizeMode": "contain",
+          "backgroundColor": "#FF6A4D",
+          "dark": {
+            "image": "./assets/images/splash-icon.png",
+            "backgroundColor": "#2A1D3A"
+          }
+        }
+      ],
       "expo-status-bar",
       "expo-web-browser",
       "@kesha-antonov/react-native-background-downloader",
