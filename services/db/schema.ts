@@ -6,7 +6,8 @@
  */
 
 export const MIGRATIONS: string[] = [
-  // v0 → v1: notes + full-text index kept in sync by triggers.
+  // v0 → v1: notes + full-text index kept in sync by triggers. (Not yet
+  // shipped to users when last edited; from the first release on, append only.)
   `
   CREATE TABLE IF NOT EXISTS notes (
     id TEXT PRIMARY KEY NOT NULL,
@@ -31,20 +32,20 @@ export const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS notes_content_hash ON notes(content_hash);
 
   CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
-    id UNINDEXED, title, transcription, tags, tokenize = 'unicode61 remove_diacritics 2'
+    id UNINDEXED, title, transcription, tags, summary, tokenize = 'unicode61 remove_diacritics 2'
   );
 
   CREATE TRIGGER IF NOT EXISTS notes_ai AFTER INSERT ON notes BEGIN
-    INSERT INTO notes_fts(id, title, transcription, tags)
-    VALUES (new.id, new.title, new.transcription, new.tags_json);
+    INSERT INTO notes_fts(id, title, transcription, tags, summary)
+    VALUES (new.id, new.title, new.transcription, new.tags_json, COALESCE(new.summary_json, ''));
   END;
   CREATE TRIGGER IF NOT EXISTS notes_ad AFTER DELETE ON notes BEGIN
     DELETE FROM notes_fts WHERE id = old.id;
   END;
-  CREATE TRIGGER IF NOT EXISTS notes_au AFTER UPDATE OF title, transcription, tags_json ON notes BEGIN
+  CREATE TRIGGER IF NOT EXISTS notes_au AFTER UPDATE OF title, transcription, tags_json, summary_json ON notes BEGIN
     DELETE FROM notes_fts WHERE id = old.id;
-    INSERT INTO notes_fts(id, title, transcription, tags)
-    VALUES (new.id, new.title, new.transcription, new.tags_json);
+    INSERT INTO notes_fts(id, title, transcription, tags, summary)
+    VALUES (new.id, new.title, new.transcription, new.tags_json, COALESCE(new.summary_json, ''));
   END;
 
   CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY NOT NULL, value TEXT);

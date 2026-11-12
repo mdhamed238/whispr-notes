@@ -11,9 +11,11 @@ interface Props {
   icon: React.ComponentProps<typeof Ionicons>['name'];
   title: string;
   subtitle?: string;
+  /** Call-to-action buttons under the text. */
+  children?: React.ReactNode;
 }
 
-export default function EmptyState({ icon, title, subtitle }: Props) {
+export default function EmptyState({ icon, title, subtitle, children }: Props) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
 
@@ -24,6 +26,7 @@ export default function EmptyState({ icon, title, subtitle }: Props) {
       </View>
       <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
       {subtitle && <Text style={[styles.subtitle, { color: colors.textMuted }]}>{subtitle}</Text>}
+      {children && <View style={styles.actions}>{children}</View>}
     </Animated.View>
   );
 }
@@ -40,4 +43,5 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: FontSize.lg, fontWeight: '700', marginBottom: Spacing.sm, textAlign: 'center' },
   subtitle: { fontSize: FontSize.md, textAlign: 'center', lineHeight: 22 },
+  actions: { marginTop: Spacing.xl, gap: Spacing.md, alignSelf: 'stretch' },
 });
