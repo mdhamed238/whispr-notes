@@ -91,3 +91,10 @@ describe('contentHash', () => {
     expect(contentHash('T', 'a')).not.toBe(contentHash('T', 'b'));
   });
 });
+
+describe('import safety', () => {
+  test('ENEX with a DOCTYPE or entity declarations is rejected', () => {
+    const bomb = `<?xml version="1.0"?><!DOCTYPE en-export [<!ENTITY a "aaaaaaaaaa"><!ENTITY b "&a;&a;&a;&a;">]><en-export><note><title>&b;</title></note></en-export>`;
+    expect(() => parseEnex(bomb)).toThrow(/not supported/i);
+  });
+});

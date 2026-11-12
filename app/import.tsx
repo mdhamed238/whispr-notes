@@ -18,7 +18,10 @@ import { FontSize, Spacing } from '@/constants/Spacing';
 import { Radius } from '@/constants/theme';
 import { usePro } from '@/hooks/usePro';
 import { haptic } from '@/services/haptics';
+import { Paths } from 'expo-file-system';
+
 import { importFiles, type ImportReport } from '@/services/import/importer';
+import { incomingFileName, isAcceptableIncomingUri } from '@/services/import/incoming';
 
 function parseReport(raw: string | undefined): ImportReport | null {
   if (!raw) return null;
@@ -37,21 +40,27 @@ export default function ImportScreen() {
   const router = useRouter();
   const { isPro, loading: proLoading } = usePro();
   const [report, setReport] = useState<ImportReport | null>(() => parseReport(params.report));
-  const [running, setRunning] = useState(Boolean(params.uri) && !params.report);
+  const [running, setRunning] = useState(false);
+  const incoming = params.uri && !params.report ? params.uri : null;
+  const incomingOk = incoming ? isAcceptableIncomingUri(incoming, Paths.document.uri) : false;
+  const incomingName = incoming ? incomingFileName(incoming) : '';
 
-  useEffect(() => {
-    if (!params.uri || params.report || proLoading) return;
+  // A file from another app is only imported after the user confirms it.
+  const confirmIncoming = async () => {
+    if (!incoming || !incomingOk) return;
     if (!isPro) {
       router.replace('/paywall');
       return;
     }
-    const uri = params.uri;
-    const name = decodeURIComponent(uri.split('/').pop() ?? 'file.md');
-    importFiles([{ uri, name }])
-      .then(setReport)
-      .catch(() => setReport({ imported: 0, duplicates: 0, failed: [{ name, reason: 'Could not read this file' }] }))
-      .finally(() => setRunning(false));
-  }, [params.uri, params.report, isPro, proLoading, router]);
+    setRunning(true);
+    try {
+      setReport(await importFiles([{ uri: incoming, name: incomingName }]));
+    } catch {
+      setReport({ imported: 0, duplicates: 0, failed: [{ name: incomingName, reason: 'Could not read this file' }] });
+    } finally {
+      setRunning(false);
+    }
+  };
 
   useEffect(() => {
     if (report) void haptic(report.imported > 0 ? 'success' : report.failed.length ? 'error' : 'warning');
@@ -61,7 +70,23 @@ export default function ImportScreen() {
     <SafeAreaView style={styles.container}>
       <ModalHeader title="Import" variant="close" />
       <ScrollView contentContainerStyle={styles.content}>
-        {running || !report ? (
+        {incoming && !report && !running ? (
+          <View style={{ gap: Spacing.lg }}>
+            <View style={[styles.hero, { backgroundColor: colors.card }]}>
+              <Ionicons name={incomingOk ? 'document-text-outline' : 'alert-circle-outline'} size={40} color={incomingOk ? colors.tint : colors.danger} />
+              <Text style={styles.heroTitle}>{incomingOk ? `Import “${incomingName}”?` : "This file can't be imported"}</Text>
+              <Text style={styles.muted}>
+                {incomingOk
+                  ? 'Its notes are added to WhisprNotes on this phone. Nothing is uploaded.'
+                  : 'Open a Markdown, text, Evernote or zip file shared from another app.'}
+              </Text>
+            </View>
+            {incomingOk && (
+              <Button label={isPro || proLoading ? 'Import' : 'Import with Pro'} icon="download-outline" onPress={confirmIncoming} />
+            )}
+            <Button label="Cancel" variant="secondary" onPress={() => router.back()} />
+          </View>
+        ) : running || !report ? (
           <View style={styles.center}>
             <ActivityIndicator color={colors.tint} />
             <Text style={styles.muted}>Importing…</Text>

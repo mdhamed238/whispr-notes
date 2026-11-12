@@ -30,7 +30,6 @@
               "public.plain-text",
               "net.daringfireball.markdown",
               "public.zip-archive",
-              
               "public.xml"
             ]
           }
@@ -58,8 +57,7 @@
         {
           "action": "VIEW",
           "category": [
-            "DEFAULT",
-            "BROWSABLE"
+            "DEFAULT"
           ],
           "data": [
             {
