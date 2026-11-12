@@ -36,17 +36,6 @@ export const STREAMING_CONFIG = {
   VAD_DETECTION_MARGIN_MS: 300,
 } as const;
 
-// Ceiling on the post-save timestamp pass (services/transcriptionTimeline).
-//
-// That pass re-transcribes the whole finished recording in one call, so its
-// cost grows with recording length while the record screen waits to reset.
-// Past this length the note is saved with text only rather than stalling the
-// UI for minutes on a recording that is unlikely to be scrubbed word by word
-// anyway. Raise it once the pass has been measured on real hardware.
-export const TIMELINE_CONFIG = {
-  MAX_DURATION_SECONDS: 600,
-} as const;
-
 // Notes list limits
 export const UI_CONFIG = {
   // Audio is now streamed to disk as it arrives (see services/wavEncoder),
