@@ -3,8 +3,8 @@
  * dock with a spring-animated bubble sliding behind the active icon.
  */
 import { Tabs } from 'expo-router';
-import React, { useEffect } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Keyboard, Pressable, StyleSheet, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -32,6 +32,17 @@ export default function FloatingTabBar({ state, descriptors, navigation }: Botto
   const colors = Colors[colorScheme ?? 'light'];
   const insets = useSafeAreaInsets();
 
+  // A dock floating over the keyboard covers the field being typed into.
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardOpen(true));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardOpen(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
   const indicator = useSharedValue(state.index * ITEM_SIZE + BUBBLE_OFFSET);
 
   useEffect(() => {
@@ -44,6 +55,8 @@ export default function FloatingTabBar({ state, descriptors, navigation }: Botto
   const indicatorStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: indicator.value }],
   }));
+
+  if (keyboardOpen) return null;
 
   return (
     <View pointerEvents="box-none" style={[styles.wrapper, { bottom: insets.bottom + 16 }]}>
