@@ -2,14 +2,14 @@
  * Base pressable used by every tappable element in the app: spring
  * scale-down on press plus an optional haptic on a completed tap.
  */
-import * as Haptics from 'expo-haptics';
+import { haptic as playHaptic, type HapticKind as ServiceHapticKind } from '@/services/haptics';
 import React from 'react';
 import { GestureResponderEvent, Pressable, PressableProps, StyleProp, ViewStyle } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 
 const AnimatedPressableBase = Animated.createAnimatedComponent(Pressable);
 
-export type HapticKind = 'light' | 'medium' | 'selection' | 'none';
+export type HapticKind = ServiceHapticKind | 'none';
 
 interface Props extends Omit<PressableProps, 'style'> {
   scaleTo?: number;
@@ -45,13 +45,7 @@ export default function AnimatedPressable({
   };
 
   const handlePress = (e: GestureResponderEvent) => {
-    if (haptic === 'selection') {
-      Haptics.selectionAsync();
-    } else if (haptic !== 'none') {
-      Haptics.impactAsync(
-        haptic === 'medium' ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light
-      );
-    }
+    if (haptic !== 'none') void playHaptic(haptic);
     onPress?.(e);
   };
 

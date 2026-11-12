@@ -2,7 +2,6 @@
  * Custom floating pill tab bar for the (tabs) navigator: a dark rounded
  * dock with a spring-animated bubble sliding behind the active icon.
  */
-import * as Haptics from 'expo-haptics';
 import { Tabs } from 'expo-router';
 import React, { useEffect } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
@@ -12,6 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { Radius, Shadow } from '@/constants/theme';
+import { haptic } from '@/services/haptics';
 
 /**
  * expo-router ships its own bottom-tabs types, which are structurally
@@ -57,7 +57,7 @@ export default function FloatingTabBar({ state, descriptors, navigation }: Botto
           const onPress = () => {
             const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
             if (!focused && !event.defaultPrevented) {
-              Haptics.selectionAsync();
+              void haptic('selection');
               navigation.navigate(route.name);
             }
           };

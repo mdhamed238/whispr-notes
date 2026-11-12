@@ -2,17 +2,22 @@ import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 // SDK 56 dropped expo-router's react-navigation compatibility, and
 // executorch 0.10 moved the timestamped transcription API (verbose segments)
 // behind its `/legacy` entry point — the new root API returns plain strings
 // with no word timings, which the note timeline depends on.
 import { initExecutorch } from 'react-native-executorch/legacy';
 import { ExpoResourceFetcher } from 'react-native-executorch-expo-resource-fetcher/legacy';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useColorScheme } from '@/components/useColorScheme';
+import { ActionSheetProvider } from '@/components/ui/ActionSheet';
+import { ToastProvider } from '@/components/ui/Toast';
 import Colors from '@/constants/Colors';
+import { getSettings } from '@/services/settings';
 
 initExecutorch({ resourceFetcher: ExpoResourceFetcher });
 
@@ -30,10 +35,17 @@ export const unstable_settings = {
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-  const [loaded, error] = useFonts({
+  const [fontsLoaded, error] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
     ...FontAwesome.font,
   });
+  // Settings gate the first screen (onboarding) and haptics, so they load
+  // before the splash screen hides.
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  useEffect(() => {
+    getSettings().finally(() => setSettingsLoaded(true));
+  }, []);
+  const loaded = fontsLoaded && settingsLoaded;
 
   // Expo Router uses Error Boundaries to catch errors in the navigation tree.
   useEffect(() => {
@@ -64,9 +76,17 @@ function RootLayoutNav() {
   // colour the area behind a screen during transitions — which contentStyle
   // covers directly.
   return (
-    <Stack screenOptions={{ contentStyle: { backgroundColor: colors.background } }}>
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="note/[id]" options={{ presentation: 'modal', headerShown: false }} />
-    </Stack>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors.background }}>
+      <SafeAreaProvider>
+        <ToastProvider>
+          <ActionSheetProvider>
+            <Stack screenOptions={{ contentStyle: { backgroundColor: colors.background } }}>
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen name="note/[id]" options={{ presentation: 'modal', headerShown: false }} />
+            </Stack>
+          </ActionSheetProvider>
+        </ToastProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
