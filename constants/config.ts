@@ -62,3 +62,6 @@ export const ERROR_MESSAGES = {
     'Microphone permission is required to record audio. Please enable it in Settings.',
   RECORDING_FAILED: 'Failed to start recording. Please try again.',
 } as const;
+
+// Public contact for support, privacy and legal requests.
+export const CONTACT_EMAIL = 'mdhamed.off@gmail.com';

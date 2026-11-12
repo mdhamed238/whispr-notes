@@ -1,6 +1,6 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
+import { Stack, useRootNavigationState, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
 // SDK 56 dropped expo-router's react-navigation compatibility, and
@@ -17,7 +17,7 @@ import { useColorScheme } from '@/components/useColorScheme';
 import { ActionSheetProvider } from '@/components/ui/ActionSheet';
 import { ToastProvider } from '@/components/ui/Toast';
 import Colors from '@/constants/Colors';
-import { getSettings } from '@/services/settings';
+import { getSettings, peekSettings } from '@/services/settings';
 
 initExecutorch({ resourceFetcher: ExpoResourceFetcher });
 
@@ -68,6 +68,18 @@ export default function RootLayout() {
 function RootLayoutNav() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+  const router = useRouter();
+  const navigationState = useRootNavigationState();
+
+  // First launch: show onboarding once the navigator is mounted. Settings
+  // are already loaded (RootLayout waits for them before rendering this).
+  useEffect(() => {
+    if (!navigationState?.key) return;
+    if (!peekSettings().onboardingCompleted) {
+      router.replace('/onboarding');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigationState?.key]);
 
   // The react-navigation ThemeProvider this used to wrap is gone: expo-router
   // no longer supports react-navigation as of SDK 56. Every screen already
@@ -82,7 +94,18 @@ function RootLayoutNav() {
           <ActionSheetProvider>
             <Stack screenOptions={{ contentStyle: { backgroundColor: colors.background } }}>
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              <Stack.Screen name="note/[id]" options={{ presentation: 'modal', headerShown: false }} />
+              <Stack.Screen
+                name="note/[id]"
+                options={{ headerShown: false, gestureEnabled: true, animation: 'slide_from_right', fullScreenGestureEnabled: true }}
+              />
+              <Stack.Screen name="paywall" options={{ headerShown: false, presentation: 'modal' }} />
+              <Stack.Screen name="import" options={{ headerShown: false, presentation: 'modal' }} />
+              <Stack.Screen
+                name="onboarding"
+                options={{ headerShown: false, presentation: 'fullScreenModal', gestureEnabled: false, animation: 'fade' }}
+              />
+              <Stack.Screen name="legal/[doc]" options={{ headerShown: false, animation: 'slide_from_right' }} />
+              <Stack.Screen name="models" options={{ headerShown: false, animation: 'slide_from_right' }} />
             </Stack>
           </ActionSheetProvider>
         </ToastProvider>
