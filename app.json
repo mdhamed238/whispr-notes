@@ -142,6 +142,10 @@
       "router": {},
       "eas": {
         "projectId": "b4ecdfb9-71ef-4bca-9728-2a264cdfd87e"
+      },
+      "revenueCat": {
+        "iosKey": "",
+        "androidKey": ""
       }
     },
     "owner": "mdhamed.dev"

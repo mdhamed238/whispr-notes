@@ -19,6 +19,7 @@ import { ToastProvider } from '@/components/ui/Toast';
 import Colors from '@/constants/Colors';
 import * as enhanceQueue from '@/services/ai/enhanceQueue';
 import { clearExports } from '@/services/export/exporter';
+import { initPurchases } from '@/services/billing/purchases';
 import '@/services/ai/summarizer';
 import { getSettings, peekSettings } from '@/services/settings';
 
@@ -52,6 +53,8 @@ export default function RootLayout() {
       void enhanceQueue.start();
       // Export files are only needed until shared; don't let them pile up.
       clearExports();
+      // Refresh the Pro entitlement in the background (works offline from cache).
+      void initPurchases();
     });
   }, []);
   const loaded = fontsLoaded && settingsLoaded;
