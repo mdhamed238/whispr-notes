@@ -39,7 +39,6 @@
         "monochromeImage": "./assets/images/adaptive-icon-monochrome.png",
         "backgroundColor": "#FF6A4D"
       },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.RECORD_AUDIO",
