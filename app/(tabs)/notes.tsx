@@ -29,7 +29,9 @@ import { Radius, Shadow } from '@/constants/theme';
 import { useNotes, useTags } from '@/hooks/useNotes';
 import { usePro } from '@/hooks/usePro';
 import * as notesRepo from '@/services/db/notesRepo';
+import { ExportPanel } from '@/components/ExportSheet';
 import { exportTextFile, shareFile } from '@/services/export/exporter';
+import { loadTimeline } from '@/services/timelineStore';
 import { formatClock } from '@/services/export/generators';
 import { haptic } from '@/services/haptics';
 import { runImportFlow } from '@/services/import/importFlow';
@@ -144,13 +146,25 @@ export default function NotesScreen() {
         title: note.title,
         actions: [
           { label: note.pinned ? 'Unpin' : 'Pin to top', icon: note.pinned ? 'bookmark' : 'bookmark-outline', onPress: () => togglePin(note) },
-          { label: 'Share as text', icon: 'share-outline', onPress: () => shareAsText(note) },
+          { label: 'Share as text', icon: 'chatbox-ellipses-outline', onPress: () => shareAsText(note) },
+          {
+            label: 'Export…',
+            icon: 'share-outline',
+            onPress: async () => {
+              const timeline = note.audioUri ? await loadTimeline(note.id) : null;
+              sheet.open({
+                title: 'Export & share',
+                content: <ExportPanel note={note} isPro={isPro} hasTimeline={Boolean(timeline?.length)} />,
+                actions: [],
+              });
+            },
+          },
           { label: 'Open', icon: 'open-outline', onPress: () => router.push(`/note/${note.id}`) },
           { label: 'Delete', icon: 'trash-outline', destructive: true, onPress: () => deleteWithUndo(note) },
         ],
       });
     },
-    [sheet, togglePin, shareAsText, deleteWithUndo, router]
+    [sheet, togglePin, shareAsText, deleteWithUndo, router, isPro]
   );
 
   const openSort = () =>

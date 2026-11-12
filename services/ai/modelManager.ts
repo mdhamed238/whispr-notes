@@ -85,7 +85,7 @@ export async function download(id: ModelId): Promise<void> {
         const total = bytesTotal > 0 ? bytesTotal : info.approxBytes;
         notify(id, 'downloading', Math.min(0.999, bytesDownloaded / total));
       })
-      .done(({ bytesDownloaded, bytesTotal }) => {
+      .done(async ({ bytesDownloaded, bytesTotal }) => {
         active.delete(id);
         const total = expected ?? (bytesTotal > 0 ? bytesTotal : null);
         try {
@@ -96,7 +96,7 @@ export async function download(id: ModelId): Promise<void> {
           }
           const final = new File(dir, info.fileName!);
           if (final.exists) final.delete();
-          part.move(final);
+          await part.move(final);
           notify(id, 'ready', 1);
           resolve();
         } catch (error) {
