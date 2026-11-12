@@ -21,7 +21,7 @@ import {
 } from '@/constants/config';
 import { FontSize, Spacing } from '@/constants/Spacing';
 import { Radius, Shadow } from '@/constants/theme';
-import storageService from '@/services/storageService';
+import * as notesRepo from '@/services/db/notesRepo';
 import { saveTimeline } from '@/services/timelineStore';
 import { runHarness } from '@/services/transcriptionHarness';
 import { buildTimeline } from '@/services/transcriptionTimeline';
@@ -474,7 +474,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
         // it since Save. An edit made in that window wins outright — and in
         // that case the timeline is dropped too, since it would describe
         // words the user has already replaced.
-        const stored = (await storageService.getNotes()).find((n) => n.id === saved.id);
+        const stored = await notesRepo.getNote(saved.id);
         const untouched =
           stored?.transcription === saved.transcription && stored?.title === saved.title;
 
@@ -491,7 +491,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
         // better transcript. Taking it also keeps the stored text, the
         // timeline, listen mode and SRT in agreement.
         if (timeline.text) {
-          await storageService.updateNote(saved.id, {
+          await notesRepo.updateNote(saved.id, {
             transcription: timeline.text,
             // The title was derived from the streamed text at save time, so
             // it is regenerated from the same source as the text it now
@@ -569,9 +569,16 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
         pinned: false,
         createdAt: now,
         updatedAt: now,
+        summary: null,
+        language: null,
+        source: 'recording',
+        enhancement: 'none',
+        enhancementProgress: 0,
+        titleIsAuto: true,
+        contentHash: null,
       };
 
-      await storageService.saveNote(note);
+      await notesRepo.createNote(note);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
       // The note is saved and the user moves on immediately — the timeline

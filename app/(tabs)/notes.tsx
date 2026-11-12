@@ -14,7 +14,8 @@ import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { FontSize, Spacing } from '@/constants/Spacing';
 import { Radius, Shadow } from '@/constants/theme';
-import storageService from '@/services/storageService';
+import * as notesRepo from '@/services/db/notesRepo';
+import { exportTextFile, shareFile } from '@/services/export/exporter';
 import { Note } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -75,7 +76,7 @@ export default function NotesScreen() {
       if (!hasLoadedOnceRef.current) {
         setLoading(true);
       }
-      const items = await storageService.getNotes();
+      const items = await notesRepo.listNotes();
       setNotes(items);
     } catch (error) {
       console.error('Failed to load notes:', error);
@@ -129,7 +130,7 @@ export default function NotesScreen() {
   const handleTogglePin = useCallback(
     async (note: Note) => {
       try {
-        await storageService.updateNote(note.id, { pinned: !note.pinned });
+        await notesRepo.updateNote(note.id, { pinned: !note.pinned });
         await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         loadNotes();
       } catch (error) {
@@ -149,7 +150,8 @@ export default function NotesScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await storageService.deleteNote(note.id);
+              const deleted = await notesRepo.deleteNote(note.id);
+              if (deleted) notesRepo.purgeNoteFiles(deleted);
               loadNotes();
             } catch (error) {
               console.error('Failed to delete note:', error);
@@ -164,8 +166,8 @@ export default function NotesScreen() {
 
   const handleExport = useCallback(async (note: Note) => {
     try {
-      const fileUri = await storageService.exportNote(note.id, { format: 'txt', includeMetadata: true });
-      await storageService.shareExportedFile(fileUri);
+      const fileUri = await exportTextFile(note, 'txt');
+      await shareFile(fileUri, 'text/plain');
     } catch (error) {
       console.error('Failed to export note:', error);
       Alert.alert('Error', 'Failed to export note');
