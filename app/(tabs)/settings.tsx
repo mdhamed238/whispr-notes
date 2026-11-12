@@ -9,6 +9,7 @@ import { Modal, Pressable, ScrollView, StatusBar, StyleSheet, Text, TextInput, V
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import LogoMark from '@/components/brand/LogoMark';
 import ScreenHeader from '@/components/ui/ScreenHeader';
 import { SettingsRow, SettingsSection } from '@/components/ui/SettingsList';
 import { useActionSheet } from '@/components/ui/ActionSheet';
@@ -165,6 +166,13 @@ export default function SettingsScreen() {
             />
           </SettingsSection>
 
+          <View style={styles.about}>
+            <LogoMark size={44} />
+            <View>
+              <Text style={styles.aboutName}>WhisprNotes</Text>
+              <Text style={styles.aboutTag}>Private voice notes, transcribed on your phone.</Text>
+            </View>
+          </View>
           <SettingsSection title="About">
             <SettingsRow icon="lock-closed-outline" label="Privacy Policy" onPress={() => router.push('/legal/privacy')} />
             <SettingsRow icon="document-text-outline" label="Terms of Use" onPress={() => router.push('/legal/terms')} />
@@ -259,6 +267,9 @@ function createStyles(colors: typeof Colors.light) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
     content: { paddingHorizontal: Spacing.xl, paddingTop: Spacing.lg, paddingBottom: 140 },
+    about: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, marginBottom: Spacing.md, marginLeft: Spacing.sm },
+    aboutName: { fontSize: FontSize.md, fontWeight: '800', color: colors.text },
+    aboutTag: { fontSize: FontSize.xs, color: colors.textMuted },
     proCard: {
       backgroundColor: colors.navBackground,
       borderRadius: Radius.xl,
