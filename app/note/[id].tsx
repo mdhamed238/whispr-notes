@@ -12,7 +12,8 @@ import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { FontSize, Spacing } from '@/constants/Spacing';
 import { Radius } from '@/constants/theme';
-import storageService from '@/services/storageService';
+import * as notesRepo from '@/services/db/notesRepo';
+import { EXPORT_MIME, exportTextFile, shareFile } from '@/services/export/exporter';
 import { deleteTimeline, loadTimeline } from '@/services/timelineStore';
 import { Note, TranscriptSegment, TranscriptWord } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
@@ -81,8 +82,7 @@ export default function NoteDetailScreen() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const notes = await storageService.getNotes();
-      const found = notes.find((n) => n.id === id) ?? null;
+      const found = id ? await notesRepo.getNote(id) : null;
       const segments = found?.audioUri ? await loadTimeline(found.id) : null;
       if (!cancelled) {
         setNote(found);
@@ -103,7 +103,7 @@ export default function NoteDetailScreen() {
 
   const persist = (updates: Partial<Note>) => {
     if (!id) return;
-    storageService.updateNote(id, updates).catch((error) => {
+    notesRepo.updateNote(id, updates).catch((error) => {
       console.error('Failed to update note:', error);
     });
   };
@@ -208,7 +208,10 @@ export default function NoteDetailScreen() {
               clearTimeout(autosaveTimer.current);
               autosaveTimer.current = null;
             }
-            if (id) await storageService.deleteNote(id);
+            if (id) {
+              const deleted = await notesRepo.deleteNote(id);
+              if (deleted) notesRepo.purgeNoteFiles(deleted);
+            }
             router.back();
           } catch (error) {
             console.error('Failed to delete note:', error);
@@ -219,11 +222,11 @@ export default function NoteDetailScreen() {
     ]);
   };
 
-  const handleExport = async (format: 'txt' | 'json' | 'srt') => {
-    if (!id) return;
+  const handleExport = async (format: 'txt' | 'srt') => {
+    if (!note) return;
     try {
-      const fileUri = await storageService.exportNote(id, { format, includeMetadata: true });
-      await storageService.shareExportedFile(fileUri);
+      const fileUri = await exportTextFile({ ...note, title, transcription, tags }, format);
+      await shareFile(fileUri, EXPORT_MIME[format]);
     } catch (error) {
       console.error('Failed to export note:', error);
       Alert.alert('Error', 'Failed to export note');
@@ -233,7 +236,6 @@ export default function NoteDetailScreen() {
   const handleExportPress = () => {
     Alert.alert('Export Note', undefined, [
       { text: 'Text (.txt)', onPress: () => handleExport('txt') },
-      { text: 'JSON (.json)', onPress: () => handleExport('json') },
       { text: 'Subtitles (.srt)', onPress: () => handleExport('srt') },
       { text: 'Cancel', style: 'cancel' },
     ]);

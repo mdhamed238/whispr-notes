@@ -80,7 +80,8 @@
       "expo-splash-screen",
       "expo-status-bar",
       "expo-web-browser",
-      "@kesha-antonov/react-native-background-downloader"
+      "@kesha-antonov/react-native-background-downloader",
+      "expo-sqlite"
     ],
     "experiments": {
       "typedRoutes": true

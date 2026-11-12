@@ -36,6 +36,20 @@ export interface TranscriptSegment {
  * treat `null` as the normal case.
  */
 
+export type EnhancementState = 'none' | 'pending' | 'running' | 'done' | 'failed';
+
+/** Structured meeting summary produced on-device by the summarizer. */
+export interface NoteSummary {
+  overview: string;
+  keyPoints: string[];
+  actionItems: string[];
+  decisions: string[];
+  /** Which LLM produced it, e.g. `qwen3-1.7b`. */
+  model: string;
+  /** ISO timestamp. */
+  generatedAt: string;
+}
+
 export interface Note {
   id: string;
   title: string;
@@ -46,23 +60,23 @@ export interface Note {
   pinned: boolean;
   createdAt: Date;
   updatedAt: Date;
+  summary: NoteSummary | null;
+  /** Language the final transcript is in (ISO code), when known. */
+  language: string | null;
+  source: 'recording' | 'import';
+  /** State of the post-recording "enhanced transcription" pass. */
+  enhancement: EnhancementState;
+  /** 0..1, or -1 when the running engine can't report progress. */
+  enhancementProgress: number;
+  /** True while the title is machine-generated; a user edit sets it false. */
+  titleIsAuto: boolean;
+  /** Set for imported notes, used to skip duplicates on re-import. */
+  contentHash: string | null;
 }
+
+export type NoteSort = 'newest' | 'oldest' | 'longest' | 'title';
 
 export interface AudioConfig {
   sampleRate: 16000;
   numberOfChannels: 1;
-}
-
-export interface ExportOptions {
-  format: 'txt' | 'json' | 'srt';
-  includeMetadata: boolean;
-}
-
-export interface StorageServiceInterface {
-  saveNote(note: Note): Promise<void>;
-  getNotes(): Promise<Note[]>;
-  updateNote(id: string, updates: Partial<Note>): Promise<void>;
-  deleteNote(id: string): Promise<void>;
-  exportNote(id: string, options: ExportOptions): Promise<string>;
-  shareExportedFile(fileUri: string): Promise<void>;
 }

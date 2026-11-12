@@ -47,14 +47,8 @@ export const TIMELINE_CONFIG = {
   MAX_DURATION_SECONDS: 600,
 } as const;
 
-// Storage keys for AsyncStorage
-export const STORAGE_KEYS = {
-  TRANSCRIPTIONS: 'transcriptions',
-} as const;
-
 // Notes list limits
 export const UI_CONFIG = {
-  MAX_HISTORY_ITEMS: 1000,
   // Audio is now streamed to disk as it arrives (see services/wavEncoder),
   // so stopping is a 44-byte header patch rather than a full synchronous
   // encode — length is bounded by disk space, not the JS heap. This cap is
@@ -67,11 +61,4 @@ export const ERROR_MESSAGES = {
   MICROPHONE_PERMISSION_DENIED:
     'Microphone permission is required to record audio. Please enable it in Settings.',
   RECORDING_FAILED: 'Failed to start recording. Please try again.',
-} as const;
-
-// Export formats supported by storageService.exportNote
-export const EXPORT_FORMATS = {
-  TXT: 'txt',
-  JSON: 'json',
-  SRT: 'srt',
 } as const;
