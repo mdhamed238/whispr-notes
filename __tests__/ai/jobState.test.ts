@@ -37,3 +37,18 @@ describe('nextJob', () => {
     expect(nextJob([job({ state: 'failed' }), job({ state: 'running' })])).toBeNull();
   });
 });
+
+describe('review fixes', () => {
+  const { isTransientEngineError, restoredEnhancement } = require('../../services/ai/jobState');
+  test('network and download failures are transient, not a broken engine', () => {
+    expect(isTransientEngineError(new Error('Network request failed'))).toBe(true);
+    expect(isTransientEngineError(new Error('Failed to load whisper-small: download failed: timeout'))).toBe(true);
+    expect(isTransientEngineError(new Error('The Internet connection appears to be offline.'))).toBe(true);
+    expect(isTransientEngineError(new Error('Failed to load: out of memory'))).toBe(false);
+  });
+  test('a restored note never comes back mid-enhancement', () => {
+    expect(restoredEnhancement('running')).toBe('none');
+    expect(restoredEnhancement('pending')).toBe('none');
+    expect(restoredEnhancement('done')).toBe('done');
+  });
+});

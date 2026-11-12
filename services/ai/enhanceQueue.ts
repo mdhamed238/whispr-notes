@@ -22,7 +22,7 @@ import { detectTier } from './device';
 import { createExecutorchEngine } from './engines/executorchEngine';
 import { AbortedError, EngineLoadError, type TranscriptionEngine } from './engines/types';
 import { createWhisperRnEngine } from './engines/whisperRnEngine';
-import { Job, JobKind, nextJob, recoverJobs } from './jobState';
+import { Job, JobKind, isTransientEngineError, nextJob, recoverJobs } from './jobState';
 import * as modelManager from './modelManager';
 import { chooseEngine, type EngineId } from './tiers';
 
@@ -80,14 +80,27 @@ export async function start(): Promise<void> {
   if (started) return;
   started = true;
   try {
-    const recovered = recoverJobs(await loadJobs());
-    for (const job of recovered) {
+    const jobs = await loadJobs();
+    const recovered = recoverJobs(jobs);
+    for (const [i, job] of recovered.entries()) {
+      // Only jobs a killed app left running need touching.
+      if (jobs[i].state !== 'running') continue;
       await saveJob(job);
       if (job.kind === 'enhance') {
         await notesRepo
           .updateNote(job.noteId, { enhancement: job.state === 'failed' ? 'failed' : 'pending', enhancementProgress: 0 })
           .catch(() => undefined);
       }
+    }
+    // Notes that claim work in progress with no job behind it (e.g. a
+    // cancel racing the pump) would show "Enhancing…" forever.
+    const db = await getDb();
+    const orphans = await db.getAllAsync<{ id: string }>(
+      `SELECT id FROM notes WHERE enhancement IN ('pending', 'running')
+       AND id NOT IN (SELECT note_id FROM jobs WHERE kind = 'enhance')`
+    );
+    for (const { id } of orphans) {
+      await notesRepo.updateNote(id, { enhancement: 'none', enhancementProgress: 0 }).catch(() => undefined);
     }
   } catch (error) {
     console.warn('Failed to recover AI jobs:', error);
@@ -145,16 +158,23 @@ async function pump(): Promise<void> {
       } catch (error) {
         if (error instanceof AbortedError || controller.signal.aborted) {
           await removeJob(job.noteId, job.kind);
-        } else if (error instanceof EngineLoadError) {
-          // Remember the engine that can't load here and retry the job on
-          // the next one down (chooseEngine skips failed engines).
+        } else if (error instanceof EngineLoadError && !isTransientEngineError(error)) {
+          // A real load failure (memory, corrupt model): remember it and
+          // retry on the next engine down (chooseEngine skips failed ones).
           console.warn(error.message);
           const failed = new Set(peekSettings().failedEngines);
           failed.add(error.engine);
           await updateSettings({ failedEngines: [...failed] });
-          await saveJob({ ...running, state: error.engine === 'whisper-base-en' ? 'failed' : 'pending' });
+          const giveUp = error.engine === 'whisper-base-en';
+          await saveJob({ ...running, state: giveUp ? 'failed' : 'pending' });
+          if (giveUp) {
+            await notesRepo.updateNote(job.noteId, { enhancement: 'failed', enhancementProgress: 0 }).catch(() => undefined);
+          }
           await releaseEngine();
         } else {
+          // Includes transient load failures (model still downloading while
+          // offline): the note is marked failed and can be re-transcribed,
+          // without blacklisting the engine.
           console.warn(`AI job ${job.kind} failed for ${job.noteId}:`, error);
           await saveJob({ ...running, state: 'failed' });
           if (job.kind === 'enhance') {
@@ -212,6 +232,8 @@ async function runEnhance(noteId: string, signal: AbortSignal): Promise<void> {
     return;
   }
 
+  // Cancelled before getting here: don't resurrect the banner.
+  if (signal.aborted) return;
   await notesRepo.updateNote(noteId, { enhancement: 'running', enhancementProgress: 0 });
   const transcriptAtStart = note.transcription;
 

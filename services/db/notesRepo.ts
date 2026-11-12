@@ -17,6 +17,7 @@ import { Directory, File, Paths } from 'expo-file-system';
 import type { Note, NoteSort } from '../../types';
 import { deleteTimeline } from '../timelineStore';
 import { getDb } from './database';
+import { restoredEnhancement } from '../ai/jobState';
 import { NOTE_COLUMNS, NoteRow, buildUpdate, normalizeLegacy, noteToRow, rowToNote, toFtsQuery } from './mapping';
 
 const LEGACY_KEY = 'transcriptions';
@@ -190,7 +191,9 @@ export async function deleteNote(id: string): Promise<Note | null> {
 }
 
 export async function restoreNote(note: Note): Promise<void> {
-  await insert(note, 'INSERT OR REPLACE');
+  // Its background job ran (or was dropped) while it was deleted.
+  const enhancement = restoredEnhancement(note.enhancement);
+  await insert({ ...note, enhancement, enhancementProgress: enhancement === note.enhancement ? note.enhancementProgress : 0 }, 'INSERT OR REPLACE');
   emit(note.id);
 }
 
@@ -240,11 +243,15 @@ export async function deleteAllData(): Promise<void> {
   const db = await getDb();
   // secure_delete overwrites freed pages, and the checkpoint + VACUUM make
   // sure no deleted text survives in the WAL or the database's free list.
+  // On the main connection (not withExclusiveTransactionAsync, which opens
+  // another one where this pragma wouldn't apply).
   await db.execAsync('PRAGMA secure_delete = ON;');
-  await db.withExclusiveTransactionAsync(async (txn) => {
-    await txn.execAsync('DELETE FROM notes; DELETE FROM notes_fts;');
-  });
-  await db.execAsync('PRAGMA wal_checkpoint(TRUNCATE); VACUUM;');
+  await db.execAsync('BEGIN IMMEDIATE; DELETE FROM notes; DELETE FROM jobs; COMMIT;');
+  // FTS5 keeps old index segments after DELETE; rebuild drops them.
+  await db.execAsync("INSERT INTO notes_fts(notes_fts) VALUES('rebuild');");
+  // VACUUM rewrites the file without freed pages; the checkpoint after it
+  // moves the result out of the WAL so no old page survives anywhere.
+  await db.execAsync('VACUUM; PRAGMA wal_checkpoint(TRUNCATE);');
 
   const dirs = [
     ...['audio', 'timelines', 'exports', 'imports'].map((name) => new Directory(Paths.document, name)),

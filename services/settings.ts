@@ -5,7 +5,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState } from 'react';
-import { DEFAULT_SETTINGS, Settings, mergeSettings } from './settingsModel';
+import { DEFAULT_SETTINGS, Settings, mergeSettings, settingsAfterDataReset } from './settingsModel';
 
 export type { Settings } from './settingsModel';
 
@@ -50,8 +50,8 @@ export async function updateSettings(patch: Partial<Settings>): Promise<Settings
 }
 
 export async function resetSettings(): Promise<void> {
-  // Keep onboarding done: resetting data shouldn't replay the intro.
-  await updateSettings({ ...DEFAULT_SETTINGS, onboardingCompleted: true });
+  await getSettings();
+  await updateSettings(settingsAfterDataReset(current));
 }
 
 export function subscribeSettings(listener: (settings: Settings) => void): () => void {

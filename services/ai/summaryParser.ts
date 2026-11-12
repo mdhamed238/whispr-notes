@@ -17,7 +17,8 @@ const HEADINGS: [RegExp, Section][] = [
 ];
 
 const BULLET = /^\s*(?:[-*•]|\d+[.)])\s+/;
-const NONE = /^(none|n\/a|no\b.*)\.?$/i;
+// Placeholder bullets only; a real point like "No new hires" must survive.
+const NONE = /^(none|n\/a|nothing|no(ne)?\s*(action items?|decisions?|key points?)?)\.?$/i;
 
 export function stripThinking(raw: string): string {
   // Closed blocks first, then an unterminated one (model cut off mid-thought).

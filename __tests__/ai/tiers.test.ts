@@ -62,3 +62,9 @@ describe('isDownloadComplete', () => {
     expect(isDownloadComplete(0, 0)).toBe(false);
   });
 });
+
+describe('review fixes', () => {
+  test('8 GB phones reporting as low as 6.6 GiB are still flagship', () => {
+    expect(resolveTier({ totalMemoryBytes: 6.6 * GiB, abis: ['arm64-v8a'], platform: 'android' })).toBe('flagship');
+  });
+});

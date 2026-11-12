@@ -63,3 +63,10 @@ describe('parseSummaryResponse', () => {
     expect(summary.keyPoints).toEqual(['One', 'Two', 'Three']);
   });
 });
+
+describe('review fixes', () => {
+  test('real bullets starting with "No" are kept', () => {
+    const { summary } = parseSummaryResponse('## Decisions\n- No new hires until Q3.\n- None', 'm', now);
+    expect(summary.decisions).toEqual(['No new hires until Q3.']);
+  });
+});
