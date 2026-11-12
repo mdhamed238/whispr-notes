@@ -155,9 +155,17 @@ documented in the policy). Delete-all-data button in Settings.
 
 ### Brand
 Name **WhisprNotes**. Update app name, slug-facing strings, bundle display name (keep existing
-bundle identifiers unless the owner changes them). Logo: a simple mark and app icon; owner picks
-from 3–4 directions shown on a preview page before implementation. Assets: SVG source, iOS icon,
+bundle identifiers unless the owner changes them). Logo: **Direction B "Folded Note"** (owner's
+pick): white page with folded top-right corner on a coral (#FF6A4D) tile, a short ink text line
+and a five-bar coral waveform where the text would be; fold in #FFC9BB. Brand accent becomes coral;
+the app's existing blue tint is replaced by the coral/ink palette. Assets: SVG source, iOS icon,
 Android adaptive icon (foreground + background + monochrome), splash.
+
+### Website
+A small static marketing site (landing page, Privacy Policy, Terms of Use, Support/contact)
+in `website/`, deployed to Vercel on the default `*.vercel.app` URL until the owner buys a
+domain. Its Privacy and Terms URLs are what the store listings and in-app links point to.
+Contact email: **mdhamed.off@gmail.com**. Seller: the owner as an individual (no company).
 
 ### Navigation & UX
 - Tabs: **Record · Notes · Insights · Settings**. Note detail as a native stack push (not a
