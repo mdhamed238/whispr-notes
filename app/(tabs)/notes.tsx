@@ -34,7 +34,7 @@ import { exportTextFile, shareFile } from '@/services/export/exporter';
 import { loadTimeline } from '@/services/timelineStore';
 import { formatClock } from '@/services/export/generators';
 import { haptic } from '@/services/haptics';
-import { runImportFlow } from '@/services/import/importFlow';
+import { runImportFlow } from '@/services/import/importer';
 import type { Note, NoteSort } from '@/types';
 
 // Only the first screenful gets a staggered entrance; past that the delay

@@ -20,7 +20,22 @@
         "UIBackgroundModes": [
           "audio"
         ],
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Notes",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.plain-text",
+              "net.daringfireball.markdown",
+              "public.zip-archive",
+              
+              "public.xml"
+            ]
+          }
+        ],
+        "LSSupportsOpeningDocumentsInPlace": false
       },
       "bundleIdentifier": "com.mdhamed.off.audiotranscriptionapp"
     },
@@ -38,7 +53,46 @@
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
         "android.permission.FOREGROUND_SERVICE_MICROPHONE"
       ],
-      "package": "com.mdhamed.off.audiotranscriptionapp"
+      "package": "com.mdhamed.off.audiotranscriptionapp",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "category": [
+            "DEFAULT",
+            "BROWSABLE"
+          ],
+          "data": [
+            {
+              "scheme": "content",
+              "mimeType": "text/plain"
+            },
+            {
+              "scheme": "content",
+              "mimeType": "text/markdown"
+            },
+            {
+              "scheme": "content",
+              "mimeType": "text/x-markdown"
+            },
+            {
+              "scheme": "content",
+              "mimeType": "application/zip"
+            },
+            {
+              "scheme": "file",
+              "mimeType": "text/plain"
+            },
+            {
+              "scheme": "file",
+              "mimeType": "text/markdown"
+            },
+            {
+              "scheme": "file",
+              "mimeType": "application/zip"
+            }
+          ]
+        }
+      ]
     },
     "web": {
       "bundler": "metro",
