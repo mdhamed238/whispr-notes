@@ -40,7 +40,12 @@ import { languageLabel } from '@/constants/languages';
 import { FontSize, Spacing } from '@/constants/Spacing';
 import { Radius } from '@/constants/theme';
 import { useNote } from '@/hooks/useNote';
+import { usePro } from '@/hooks/usePro';
+import { useSummaryState } from '@/hooks/useSummaryState';
 import * as enhanceQueue from '@/services/ai/enhanceQueue';
+import * as summarizer from '@/services/ai/summarizer';
+import { summaryAllowance } from '@/services/billing/quota';
+import { useSettings } from '@/services/settings';
 import * as notesRepo from '@/services/db/notesRepo';
 import { EXPORT_MIME, exportTextFile, shareFile } from '@/services/export/exporter';
 import { formatClock, formatNoteDate } from '@/services/export/generators';
@@ -70,6 +75,11 @@ export default function NoteDetailScreen() {
   const toast = useToast();
 
   const { note, timeline, loading, setTimeline } = useNote(id);
+  const summaryState = useSummaryState(id);
+  const { isPro } = usePro();
+  const [settings] = useSettings();
+  const allowance = summaryAllowance(settings.summaryLog, new Date(), isPro);
+  const generating = summaryState.phase !== 'idle';
 
   const [title, setTitle] = useState('');
   const [transcription, setTranscription] = useState('');
@@ -238,6 +248,40 @@ export default function NoteDetailScreen() {
     });
   };
 
+  const handleSummarize = async () => {
+    if (!note || generating) return;
+    if (transcription.trim().split(/\s+/).length < 25) {
+      toast.show({ message: 'Record a little more to get a useful summary.' });
+      return;
+    }
+    if (!allowance.allowed) {
+      router.push('/paywall');
+      return;
+    }
+    flushPendingSave();
+    try {
+      await summarizer.summarize(note.id);
+      void haptic('success');
+      setTab('summary');
+    } catch (error) {
+      console.warn('Summary failed:', error);
+      toast.show({ message: 'Could not write a summary. Try again.', tone: 'error' });
+    }
+  };
+
+  const handleRegenerateTitle = async () => {
+    if (!note || generating) return;
+    flushPendingSave();
+    dirtyTitleRef.current = false;
+    try {
+      await summarizer.generateTitle(note.id, true);
+      void haptic('success');
+    } catch (error) {
+      console.warn('Title failed:', error);
+      toast.show({ message: 'Could not write a title. Try again.', tone: 'error' });
+    }
+  };
+
   const handleMore = () =>
     sheet.open({
       title: title || 'Note',
@@ -255,6 +299,7 @@ export default function NoteDetailScreen() {
               },
             ]
           : []),
+        { label: 'Write a new title with AI', icon: 'sparkles-outline', onPress: handleRegenerateTitle },
         {
           label: 'Duplicate',
           icon: 'copy-outline',
@@ -343,7 +388,16 @@ export default function NoteDetailScreen() {
                 multiline
                 accessibilityLabel="Title"
               />
-              {note.titleIsAuto && <Ionicons name="sparkles" size={16} color={colors.tint} accessibilityLabel="Title written by AI" />}
+              {note.titleIsAuto && (
+                <IconButton
+                  name="sparkles"
+                  size={14}
+                  color={colors.tint}
+                  background="transparent"
+                  onPress={handleRegenerateTitle}
+                  accessibilityLabel="Title written by AI. Tap to write a new one."
+                />
+              )}
             </View>
 
             <Text style={styles.metaText}>
@@ -385,6 +439,10 @@ export default function NoteDetailScreen() {
               </View>
             </View>
 
+            {generating && (
+              <SummaryProgress state={summaryState} colors={colors} styles={styles} onStop={() => summarizer.stop(note.id)} />
+            )}
+
             {note.summary && (
               <View style={styles.segment}>
                 <SegmentedControl
@@ -421,6 +479,20 @@ export default function NoteDetailScreen() {
 
       <View style={styles.bottomBar}>
         <Button label="Share" icon="share-outline" variant="secondary" onPress={handleShare} style={styles.bottomButton} />
+        <View style={styles.bottomButton}>
+          <Button
+            label={generating ? 'Writing…' : note.summary ? 'New summary' : 'Summarize'}
+            icon="sparkles"
+            loading={generating}
+            disabled={generating}
+            onPress={handleSummarize}
+          />
+          {!isPro && typeof allowance.remaining === 'number' && (
+            <Text style={styles.allowance}>
+              {allowance.remaining > 0 ? `${allowance.remaining} of 3 free this week` : 'Unlimited with Pro'}
+            </Text>
+          )}
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -451,6 +523,46 @@ function EnhancementBanner({
         </View>
       </View>
       <IconButton name="close" size={14} background="transparent" onPress={onCancel} accessibilityLabel="Cancel enhancement" />
+    </View>
+  );
+}
+
+const PHASE_LABEL: Record<string, string> = {
+  'loading-model': 'Loading the summary model…',
+  summarizing: 'Reading your transcript…',
+  merging: 'Putting it together…',
+  titling: 'Writing a title…',
+};
+
+function SummaryProgress({
+  state,
+  colors,
+  styles,
+  onStop,
+}: {
+  state: summarizer.SummaryState;
+  colors: typeof Colors.light;
+  styles: ReturnType<typeof createStyles>;
+  onStop: () => void;
+}) {
+  const label =
+    state.phase === 'loading-model' && state.downloadProgress > 0 && state.downloadProgress < 1
+      ? `Downloading the summary model… ${Math.round(state.downloadProgress * 100)}%`
+      : state.step
+        ? `${PHASE_LABEL[state.phase]} (part ${state.step.index} of ${state.step.total})`
+        : PHASE_LABEL[state.phase];
+  return (
+    <View style={styles.banner} accessibilityLiveRegion="polite">
+      <Ionicons name="sparkles" size={16} color={colors.tint} />
+      <View style={{ flex: 1, gap: 4 }}>
+        <Text style={styles.bannerText}>{label}</Text>
+        {state.partial ? (
+          <Text style={styles.partialText} numberOfLines={4}>
+            {state.partial}
+          </Text>
+        ) : null}
+      </View>
+      <IconButton name="stop" size={14} background="transparent" onPress={onStop} accessibilityLabel="Stop" />
     </View>
   );
 }
@@ -784,5 +896,7 @@ function createStyles(colors: typeof Colors.light) {
       borderTopColor: colors.border,
     },
     bottomButton: { flex: 1 },
+    allowance: { fontSize: 11, color: colors.textMuted, textAlign: 'center', marginTop: 4 },
+    partialText: { fontSize: FontSize.sm, color: colors.textMuted, lineHeight: 19 },
   });
 }
