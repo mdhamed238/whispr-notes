@@ -16,6 +16,7 @@ interface Props {
   background?: string;
   style?: StyleProp<ViewStyle>;
   haptic?: HapticKind;
+  accessibilityLabel?: string;
 }
 
 export default function IconButton({
@@ -26,6 +27,7 @@ export default function IconButton({
   background,
   style,
   haptic = 'selection',
+  accessibilityLabel,
 }: Props) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
@@ -36,6 +38,8 @@ export default function IconButton({
       onPress={onPress}
       haptic={haptic}
       hitSlop={8}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? name.replace(/-outline$/, '').replace(/-/g, ' ')}
       style={[
         {
           width: dim,

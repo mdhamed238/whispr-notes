@@ -13,16 +13,18 @@ interface Props {
   onPress?: () => void;
   onRemove?: () => void;
   tone?: 'tint' | 'muted';
+  /** Filled style for an active filter chip. */
+  selected?: boolean;
   style?: StyleProp<ViewStyle>;
   textStyle?: StyleProp<TextStyle>;
 }
 
-export default function Chip({ label, onPress, onRemove, tone = 'tint', style, textStyle }: Props) {
+export default function Chip({ label, onPress, onRemove, tone = 'tint', selected, style, textStyle }: Props) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
 
-  const bg = tone === 'tint' ? `${colors.tint}1A` : colors.surface;
-  const fg = tone === 'tint' ? colors.tint : colors.textMuted;
+  const bg = selected ? colors.tint : tone === 'tint' ? `${colors.tint}1A` : colors.surface;
+  const fg = selected ? colors.onAccent : tone === 'tint' ? colors.tint : colors.textMuted;
 
   const content = (
     <View
@@ -43,6 +45,9 @@ export default function Chip({ label, onPress, onRemove, tone = 'tint', style, t
       {onRemove && (
         <Text
           onPress={onRemove}
+          accessibilityRole="button"
+          accessibilityLabel={`Remove ${label}`}
+          suppressHighlighting
           style={{ color: fg, fontSize: FontSize.sm, fontWeight: '700', paddingLeft: 2 }}
         >
           ×
@@ -54,7 +59,13 @@ export default function Chip({ label, onPress, onRemove, tone = 'tint', style, t
   if (!onPress) return content;
 
   return (
-    <AnimatedPressable onPress={onPress} haptic="selection" style={{ borderRadius: Radius.pill }}>
+    <AnimatedPressable
+      onPress={onPress}
+      haptic="selection"
+      style={{ borderRadius: Radius.pill }}
+      accessibilityRole="button"
+      accessibilityState={{ selected: !!selected }}
+    >
       {content}
     </AnimatedPressable>
   );

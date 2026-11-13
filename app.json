@@ -1,48 +1,92 @@
 {
   "expo": {
-    "name": "Audio Transcription",
-    "slug": "audio-transcription-app",
+    "name": "WhisprNotes",
+    "slug": "whisprnotes",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "audiotranscriptionapp",
+    "scheme": "whisprnotes",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/images/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "This app needs access to your microphone to record audio for transcription.",
+        "NSMicrophoneUsageDescription": "WhisprNotes uses the microphone to record your notes. Audio is processed on this device and never uploaded.",
         "UIBackgroundModes": [
-          "audio",
           "audio"
         ],
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Notes",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.plain-text",
+              "net.daringfireball.markdown",
+              "public.zip-archive",
+              "public.xml"
+            ]
+          }
+        ],
+        "LSSupportsOpeningDocumentsInPlace": false
       },
       "bundleIdentifier": "com.mdhamed.off.audiotranscriptionapp"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "monochromeImage": "./assets/images/adaptive-icon-monochrome.png",
+        "backgroundColor": "#FF6A4D"
       },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
-        "RECORD_AUDIO",
-        "WRITE_EXTERNAL_STORAGE",
-        "READ_EXTERNAL_STORAGE",
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
         "android.permission.FOREGROUND_SERVICE_MICROPHONE"
       ],
-      "package": "com.mdhamed.off.audiotranscriptionapp"
+      "package": "com.mdhamed.off.audiotranscriptionapp",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "category": [
+            "DEFAULT"
+          ],
+          "data": [
+            {
+              "scheme": "content",
+              "mimeType": "text/plain"
+            },
+            {
+              "scheme": "content",
+              "mimeType": "text/markdown"
+            },
+            {
+              "scheme": "content",
+              "mimeType": "text/x-markdown"
+            },
+            {
+              "scheme": "content",
+              "mimeType": "application/zip"
+            },
+            {
+              "scheme": "file",
+              "mimeType": "text/plain"
+            },
+            {
+              "scheme": "file",
+              "mimeType": "text/markdown"
+            },
+            {
+              "scheme": "file",
+              "mimeType": "application/zip"
+            }
+          ]
+        }
+      ],
+      "versionCode": 2
     },
     "web": {
       "bundler": "metro",
@@ -56,7 +100,7 @@
         "react-native-audio-api",
         {
           "iosBackgroundMode": true,
-          "iosMicrophonePermission": "This app requires access to the microphone to record audio for transcription.",
+          "iosMicrophonePermission": "WhisprNotes uses the microphone to record your notes. Audio is processed on this device and never uploaded.",
           "androidPermissions": [
             "android.permission.MODIFY_AUDIO_SETTINGS",
             "android.permission.FOREGROUND_SERVICE",
@@ -75,20 +119,48 @@
         {
           "ios": {
             "deploymentTarget": "17.0"
+          },
+          "android": {
+            "buildArchs": [
+              "arm64-v8a"
+            ]
           }
         }
       ],
-      "expo-asset"
+      "expo-asset",
+      "@react-native-community/datetimepicker",
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 180,
+          "resizeMode": "contain",
+          "backgroundColor": "#FF6A4D",
+          "dark": {
+            "image": "./assets/images/splash-icon.png",
+            "backgroundColor": "#2A1D3A"
+          }
+        }
+      ],
+      "expo-status-bar",
+      "expo-web-browser",
+      "@kesha-antonov/react-native-background-downloader",
+      "expo-sqlite"
     ],
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
       "router": {},
+      "revenueCat": {
+        "iosKey": "",
+        "androidKey": ""
+      },
       "eas": {
-        "projectId": "b4ecdfb9-71ef-4bca-9728-2a264cdfd87e"
+        "projectId": "1413e1b9-5c48-4d16-8bcc-fbc348bb68b2"
       }
     },
-    "owner": "mdhamed.dev"
+    "owner": "mdhamed238"
   }
 }

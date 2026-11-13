@@ -2,16 +2,26 @@
  * Custom floating pill tab bar for the (tabs) navigator: a dark rounded
  * dock with a spring-animated bubble sliding behind the active icon.
  */
-import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import * as Haptics from 'expo-haptics';
-import React, { useEffect } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Tabs } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import { Keyboard, Pressable, StyleSheet, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { Radius, Shadow } from '@/constants/theme';
+import { haptic } from '@/services/haptics';
+
+/**
+ * expo-router ships its own bottom-tabs types, which are structurally
+ * incompatible with the standalone `@react-navigation/bottom-tabs` ones
+ * (their header option types disagree on `ColorValue` vs `string`). Deriving
+ * the props from the `Tabs` component we actually render keeps this in step
+ * with whatever expo-router expects, and avoids depending on a package the
+ * app doesn't otherwise use.
+ */
+type BottomTabBarProps = Parameters<NonNullable<React.ComponentProps<typeof Tabs>['tabBar']>>[0];
 
 const ITEM_SIZE = 60;
 const BUBBLE_SIZE = 44;
@@ -21,6 +31,17 @@ export default function FloatingTabBar({ state, descriptors, navigation }: Botto
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const insets = useSafeAreaInsets();
+
+  // A dock floating over the keyboard covers the field being typed into.
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardOpen(true));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardOpen(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
 
   const indicator = useSharedValue(state.index * ITEM_SIZE + BUBBLE_OFFSET);
 
@@ -35,6 +56,8 @@ export default function FloatingTabBar({ state, descriptors, navigation }: Botto
     transform: [{ translateX: indicator.value }],
   }));
 
+  if (keyboardOpen) return null;
+
   return (
     <View pointerEvents="box-none" style={[styles.wrapper, { bottom: insets.bottom + 16 }]}>
       <View style={[styles.bar, { backgroundColor: colors.navBackground }]}>
@@ -47,7 +70,7 @@ export default function FloatingTabBar({ state, descriptors, navigation }: Botto
           const onPress = () => {
             const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
             if (!focused && !event.defaultPrevented) {
-              Haptics.selectionAsync();
+              void haptic('selection');
               navigation.navigate(route.name);
             }
           };
