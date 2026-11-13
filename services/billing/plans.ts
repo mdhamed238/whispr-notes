@@ -21,7 +21,7 @@ export interface PlanDisplay {
 export const FALLBACK_PLANS: PlanDisplay[] = [
   { id: 'yearly', title: 'Yearly', price: '$19.99', period: 'per year' },
   { id: 'monthly', title: 'Monthly', price: '$3.99', period: 'per month' },
-  { id: 'lifetime', title: 'Lifetime', price: '$39.99', period: 'one time' },
+  { id: 'lifetime', title: 'Lifetime', price: '$49.99', period: 'one time' },
 ];
 
 /** Whole-percent saving of yearly over twelve months, or null when there is none. */

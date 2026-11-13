@@ -26,7 +26,7 @@ Products (same IDs on both stores):
 |---|---|---|---|
 | `whisprnotes_pro_monthly` | Auto-renewing subscription, 1 month | $3.99 | |
 | `whisprnotes_pro_yearly` | Auto-renewing subscription, 1 year | $19.99 | Introductory offer: 7-day free trial, new subscribers only |
-| `whisprnotes_pro_lifetime` | Non-consumable (iOS) / one-time product (Play) | $39.99 | |
+| `whisprnotes_pro_lifetime` | Non-consumable (iOS) / one-time product (Play) | $49.99 | |
 
 Display names and descriptions:
 - Monthly: "WhisprNotes Pro Monthly": "Large-v3 accuracy, unlimited AI summaries, every export, import and Insights."
@@ -59,14 +59,14 @@ Let each store convert the USD base price to other countries automatically.
 2. In App Store Connect → **Apps**, find WhisprNotes, or create it (iOS, name "WhisprNotes", primary language English (U.S.), the bundle ID above, SKU `whisprnotes-ios`).
 3. **Business → Agreements**: check the status of the Paid Apps agreement. If it isn't Active, stop and tell me what's missing.
 4. In the app → **Monetization → Subscriptions**: create the group "WhisprNotes Pro" and add the monthly and yearly subscriptions with the prices above. On the yearly one, add an introductory offer: free trial, 7 days, all territories. Fill in the display names and descriptions. Upload a review screenshot only if one is required; if I need to provide it, list that under "needs me".
-5. **Monetization → In-App Purchases**: create the non-consumable `whisprnotes_pro_lifetime` at $39.99.
+5. **Monetization → In-App Purchases**: create the non-consumable `whisprnotes_pro_lifetime` at $49.99.
 6. **Users and Access → Integrations → App Store Connect API**: create a key named "RevenueCat" with the App Manager role. Download the .p8 and note the Key ID and Issuer ID.
 7. **Users and Access → Integrations → In-App Purchase**: create a key named "RevenueCat IAP". Download the .p8 and note its Key ID.
 
 ### 2. Google Play Console (play.google.com/console)
 1. Find the app WhisprNotes, or create it (default language English (US), App, Free, the package above). If it doesn't exist and creating it needs an uploaded build, stop this section and report.
 2. **Monetize → Products → Subscriptions**: create `whisprnotes_pro_monthly` (base plan `monthly`, auto-renewing, 1 month, $3.99) and `whisprnotes_pro_yearly` (base plan `yearly`, auto-renewing, 1 year, $19.99, plus an offer `trial7` with a 7-day free trial for new customers). Activate them.
-3. **Monetize → Products → In-app products**: create `whisprnotes_pro_lifetime` at $39.99 and activate it.
+3. **Monetize → Products → In-app products**: create `whisprnotes_pro_lifetime` at $49.99 and activate it.
 4. In Google Cloud, create a service account for RevenueCat as described in RevenueCat's "Google Play service credentials" guide. Grant it access in Play Console (**Users and permissions**) with the financial-data and order-management permissions that guide lists. Download its JSON key.
 
 ### 3. RevenueCat (app.revenuecat.com)
