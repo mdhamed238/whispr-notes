@@ -4,6 +4,10 @@
 
 Private voice notes and meeting summaries, transcribed **on your phone**. Live Whisper transcription while you speak, Whisper Large-v3 Turbo accuracy after you stop, and AI summaries with key points, action items and decisions. No account, no cloud, no tracking.
 
+## Releases
+
+- **Android 1.0.0 (build 2, arm64-v8a):** [EAS build and APK download](https://expo.dev/accounts/mdhamed238/projects/whisprnotes/builds/204f2e5f-74f4-4811-a22d-84a750dcb792). Built from revision `0e13bec` with the lifetime pricing and recording fixes. The APK download appears on the build page once the build succeeds.
+
 ## Features
 
 - **English live preview** as you speak (Whisper Base EN, ExecuTorch). The saved audio is transcribed again for final accuracy; Pro can use a larger model.
