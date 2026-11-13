@@ -14,9 +14,9 @@ Set up in-app purchases for my iOS/Android app **WhisprNotes** across App Store 
 | iOS bundle ID | `com.mdhamed.off.audiotranscriptionapp` |
 | Android package | `com.mdhamed.off.audiotranscriptionapp` |
 | Seller | Mohamed Hamed (individual developer) |
-| Support URL | https://whisprnotes-rho.vercel.app/support |
-| Privacy Policy URL | https://whisprnotes-rho.vercel.app/privacy |
-| Terms of Use (EULA) URL | https://whisprnotes-rho.vercel.app/terms |
+| Support URL | https://whisprnotes-app.vercel.app/support |
+| Privacy Policy URL | https://whisprnotes-app.vercel.app/privacy |
+| Terms of Use (EULA) URL | https://whisprnotes-app.vercel.app/terms |
 | Subscription group (iOS) | WhisprNotes Pro |
 | Entitlement (RevenueCat) | `pro` |
 

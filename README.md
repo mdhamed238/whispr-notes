@@ -78,7 +78,7 @@ yarn typecheck
 ## Before you ship
 
 1. **RevenueCat:** create the project; entitlement `pro`; products `whisprnotes_pro_monthly`, `whisprnotes_pro_yearly` (with intro trial), `whisprnotes_pro_lifetime`; an offering with monthly/annual/lifetime packages. Put the public SDK keys in `app.json` → `expo.extra.revenueCat`.
-2. **Website:** live at https://whisprnotes-rho.vercel.app (privacy: `/privacy`, terms: `/terms`, support: `/support`). To update: `yarn website`, then from `website/` run `vercel deploy --prod` (with `--token` if `vercel login` fails on a Mac name containing ’). When you buy a domain, update `WEBSITE_URL` in `constants/config.ts` and `docs/store/listing.md`.
+2. **Website:** live at https://whisprnotes-app.vercel.app (privacy: `/privacy`, terms: `/terms`, support: `/support`). To update: `yarn website`, then from `website/` run `vercel deploy --prod` (with `--token` if `vercel login` fails on a Mac name containing ’). When you buy a domain, update `WEBSITE_URL` in `constants/config.ts` and `docs/store/listing.md`.
 3. **Legal:** fill in the governing-law country and have the documents reviewed (see `docs/legal/README.md`).
 4. **Stores:** copy and privacy answers in `docs/store/listing.md`.
    - Apple: Individual developer account ($99/yr). Paid Apps agreement, banking and tax forms. To sell in the EU you must declare trader status, which shows your address and phone on the App Store.
