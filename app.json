@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "WhisprNotes",
-    "slug": "audio-transcription-app",
+    "slug": "whisprnotes",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -153,14 +153,14 @@
     },
     "extra": {
       "router": {},
-      "eas": {
-        "projectId": "b4ecdfb9-71ef-4bca-9728-2a264cdfd87e"
-      },
       "revenueCat": {
         "iosKey": "",
         "androidKey": ""
+      },
+      "eas": {
+        "projectId": "1413e1b9-5c48-4d16-8bcc-fbc348bb68b2"
       }
     },
-    "owner": "mdhamed.dev"
+    "owner": "mdhamed238"
   }
 }
