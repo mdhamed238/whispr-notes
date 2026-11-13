@@ -54,3 +54,7 @@ export const ERROR_MESSAGES = {
 
 // Public contact for support, privacy and legal requests.
 export const CONTACT_EMAIL = 'mdhamed.off@gmail.com';
+
+// Public website (privacy policy, terms, support). Update when a custom
+// domain replaces the Vercel URL.
+export const WEBSITE_URL = 'https://whisprnotes-rho.vercel.app';

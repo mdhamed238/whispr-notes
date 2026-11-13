@@ -1,5 +1,11 @@
 # Store listing — WhisprNotes
 
+## URLs
+
+- Marketing / support URL: https://whisprnotes-rho.vercel.app (support page: /support)
+- Privacy Policy URL: https://whisprnotes-rho.vercel.app/privacy
+- Terms of Use (EULA) URL: https://whisprnotes-rho.vercel.app/terms
+
 ## Names
 
 - **App name (30):** WhisprNotes: AI Voice Notes
@@ -51,7 +57,7 @@ WhisprNotes Pro unlocks Large-v3 accuracy, unlimited summaries, every export for
 
 Always get consent before recording others.
 
-Privacy Policy: <website>/privacy · Terms of Use: <website>/terms
+Privacy Policy: https://whisprnotes-rho.vercel.app/privacy · Terms of Use: https://whisprnotes-rho.vercel.app/terms
 
 ## App Store privacy ("nutrition label")
 

@@ -17,7 +17,8 @@ import { useToast } from '@/components/ui/Toast';
 import Button from '@/components/ui/Button';
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
-import { CONTACT_EMAIL } from '@/constants/config';
+import { CONTACT_EMAIL, WEBSITE_URL } from '@/constants/config';
+import * as WebBrowser from 'expo-web-browser';
 import { TRANSCRIPTION_LANGUAGES, languageLabel } from '@/constants/languages';
 import { FontSize, Spacing } from '@/constants/Spacing';
 import { Radius } from '@/constants/theme';
@@ -176,6 +177,7 @@ export default function SettingsScreen() {
           <SettingsSection title="About">
             <SettingsRow icon="lock-closed-outline" label="Privacy Policy" onPress={() => router.push('/legal/privacy')} />
             <SettingsRow icon="document-text-outline" label="Terms of Use" onPress={() => router.push('/legal/terms')} />
+            <SettingsRow icon="globe-outline" label="Website & support" onPress={() => void WebBrowser.openBrowserAsync(`${WEBSITE_URL}/support`)} />
             <SettingsRow icon="mail-outline" label="Contact" value={CONTACT_EMAIL} chevron={false} />
             <SettingsRow icon="information-circle-outline" label="Version" value={version} chevron={false} />
           </SettingsSection>
