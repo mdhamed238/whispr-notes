@@ -6,7 +6,7 @@ Private voice notes and meeting summaries, transcribed **on your phone**. Live W
 
 ## Releases
 
-- **Android 1.0.0 (build 2, arm64-v8a):** [EAS build and APK download](https://expo.dev/accounts/mdhamed238/projects/whisprnotes/builds/204f2e5f-74f4-4811-a22d-84a750dcb792). Built from revision `0e13bec` with the lifetime pricing and recording fixes. The APK download appears on the build page once the build succeeds.
+- **Android 1.0.0 (build 2, arm64-v8a):** [Download APK](https://expo.dev/artifacts/eas/EAy1kwiNGnk2dPYKChr4ciiu896PCVgIV9_DTusyj_4.apk) · [EAS build details](https://expo.dev/accounts/mdhamed238/projects/whisprnotes/builds/204f2e5f-74f4-4811-a22d-84a750dcb792). Built successfully from revision `0e13bec` with the lifetime pricing and recording fixes. EAS lists this build's expiration date as December 13, 2026.
 
 ## Features
 
