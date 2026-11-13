@@ -19,7 +19,7 @@ import Colors, { Brand } from '@/constants/Colors';
 import { FontSize, Spacing } from '@/constants/Spacing';
 import { Radius } from '@/constants/theme';
 import { usePro } from '@/hooks/usePro';
-import { FALLBACK_PLANS, PlanId, yearlySavingsPercent } from '@/services/billing/plans';
+import { FALLBACK_PLANS, PlanId, trialLabel, yearlySavingsPercent } from '@/services/billing/plans';
 import { getCurrentOffering, isStoreConfigured, purchase, restore } from '@/services/billing/purchases';
 import { haptic } from '@/services/haptics';
 
@@ -57,10 +57,18 @@ function plansFromOffering(offering: PurchasesOffering | null): PlanOption[] {
       price: annual.product.priceString,
       period: 'per year',
       badge: savings ? `Save ${savings}%` : 'Best value',
-      trial: annual.product.introPrice?.price === 0 ? `${annual.product.introPrice.periodNumberOfUnits}-${annual.product.introPrice.periodUnit.toLowerCase()} free trial` : undefined,
+      trial: trialLabel(annual.product.introPrice),
       pkg: annual,
     });
-  if (monthly) options.push({ id: 'monthly', title: 'Monthly', price: monthly.product.priceString, period: 'per month', pkg: monthly });
+  if (monthly)
+    options.push({
+      id: 'monthly',
+      title: 'Monthly',
+      price: monthly.product.priceString,
+      period: 'per month',
+      trial: trialLabel(monthly.product.introPrice),
+      pkg: monthly,
+    });
   if (lifetime) options.push({ id: 'lifetime', title: 'Lifetime', price: lifetime.product.priceString, period: 'one time', pkg: lifetime });
   return options;
 }
