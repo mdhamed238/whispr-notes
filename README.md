@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/brand/logo-1024.png" width="96" alt="WhisprNotes logo"></p>
+<p align="left"><img src="assets/brand/logo-1024.png" width="96" alt="WhisprNotes logo"></p>
 
 # WhisprNotes
 
@@ -6,7 +6,7 @@ Private voice notes and meeting summaries, transcribed **on your phone**. Live W
 
 ## Releases
 
-- **Android 1.0.0 (build 2, arm64-v8a):** [EAS build and APK download](https://expo.dev/accounts/mdhamed238/projects/whisprnotes/builds/204f2e5f-74f4-4811-a22d-84a750dcb792). Built from revision `0e13bec` with the lifetime pricing and recording fixes. The APK download appears on the build page once the build succeeds.
+- **Android 1.0.0 (build 2, arm64-v8a):** [Download APK](https://expo.dev/artifacts/eas/EAy1kwiNGnk2dPYKChr4ciiu896PCVgIV9_DTusyj_4.apk) · [EAS build details](https://expo.dev/accounts/mdhamed238/projects/whisprnotes/builds/204f2e5f-74f4-4811-a22d-84a750dcb792). Built successfully from revision `0e13bec` with the lifetime pricing and recording fixes. EAS lists this build's expiration date as December 13, 2026.
 
 ## Features
 
@@ -78,16 +78,6 @@ yarn ios        # or: yarn android   (dev client build)
 yarn test       # unit tests (Jest)
 yarn typecheck
 ```
-
-## Before you ship
-
-1. **RevenueCat:** create the project; entitlement `pro`; one product `whisprnotes_pro_lifetime` at $4.99 USD base (non-consumable on iOS, one-time product on Google Play); a current offering with only the lifetime package. Preserve any existing product-to-`pro` mappings so previous purchases retain their entitlement. Put the public SDK keys in `app.json` → `expo.extra.revenueCat`.
-2. **Website:** live at https://whisprnotes-app.vercel.app (privacy: `/privacy`, terms: `/terms`, support: `/support`). To update: `yarn website`, then from `website/` run `vercel deploy --prod` (with `--token` if `vercel login` fails on a Mac name containing ’). When you buy a domain, update `WEBSITE_URL` in `constants/config.ts` and `docs/store/listing.md`.
-3. **Legal:** fill in the governing-law country and have the documents reviewed (see `docs/legal/README.md`).
-4. **Stores:** copy and privacy answers in `docs/store/listing.md`.
-   - Apple: Individual developer account ($99/yr). Paid Apps agreement, banking and tax forms. To sell in the EU you must declare trader status, which shows your address and phone on the App Store.
-   - Google Play: personal account ($25). New personal accounts must run a closed test with at least 12 testers for 14 days before production.
-5. **Measure** Turbo speed and summary time on a flagship and update this README.
 
 ## License
 
