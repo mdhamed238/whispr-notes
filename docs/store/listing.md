@@ -2,9 +2,9 @@
 
 ## URLs
 
-- Marketing / support URL: https://whisprnotes-rho.vercel.app (support page: /support)
-- Privacy Policy URL: https://whisprnotes-rho.vercel.app/privacy
-- Terms of Use (EULA) URL: https://whisprnotes-rho.vercel.app/terms
+- Marketing / support URL: https://whisprnotes-app.vercel.app (support page: /support)
+- Privacy Policy URL: https://whisprnotes-app.vercel.app/privacy
+- Terms of Use (EULA) URL: https://whisprnotes-app.vercel.app/terms
 
 ## Names
 
@@ -57,7 +57,7 @@ WhisprNotes Pro unlocks Large-v3 accuracy, unlimited summaries, every export for
 
 Always get consent before recording others.
 
-Privacy Policy: https://whisprnotes-rho.vercel.app/privacy · Terms of Use: https://whisprnotes-rho.vercel.app/terms
+Privacy Policy: https://whisprnotes-app.vercel.app/privacy · Terms of Use: https://whisprnotes-app.vercel.app/terms
 
 ## App Store privacy ("nutrition label")
 

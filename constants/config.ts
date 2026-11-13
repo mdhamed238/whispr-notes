@@ -57,4 +57,4 @@ export const CONTACT_EMAIL = 'mdhamed.off@gmail.com';
 
 // Public website (privacy policy, terms, support). Update when a custom
 // domain replaces the Vercel URL.
-export const WEBSITE_URL = 'https://whisprnotes-rho.vercel.app';
+export const WEBSITE_URL = 'https://whisprnotes-app.vercel.app';
