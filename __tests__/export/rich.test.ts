@@ -38,7 +38,7 @@ describe('toMarkdown', () => {
     const md = toMarkdown(note, { scope: 'full', segments: null, timestamps: false });
     expect(md.startsWith('---\n')).toBe(true);
     expect(md).toContain('title: "Q3 \\"plan\\""');
-    expect(md).toContain('tags: [work, q3]');
+    expect(md).toContain('tags: ["work", "q3"]');
     expect(md).toContain('date: 2026-01-02T10:00:00.000Z');
     expect(md).toContain('# Q3 "plan"');
   });
@@ -81,5 +81,16 @@ describe('slugify', () => {
   test('falls back to "note"', () => {
     expect(slugify('')).toBe('note');
     expect(slugify('***')).toBe('note');
+  });
+});
+
+describe('front matter safety', () => {
+  test('tags are quoted so they cannot break or inject YAML', () => {
+    const md = toMarkdown({ ...note, tags: ['a, b]', 'x\ninjected: true'] }, { scope: 'full', segments: null, timestamps: false });
+    expect(md).toContain('tags: ["a, b]", "x injected: true"]');
+    expect(md).not.toMatch(/^injected: true$/m);
+  });
+  test('language is quoted too', () => {
+    expect(toMarkdown({ ...note, language: 'en\nx: 1' }, { scope: 'full', segments: null, timestamps: false })).toContain('language: "en x: 1"');
   });
 });

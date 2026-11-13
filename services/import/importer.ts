@@ -77,8 +77,18 @@ export async function importFiles(assets: { uri: string; name: string }[]): Prom
       let kind = detectImportKind(asset.name, '');
       const named = /\.[a-z0-9]+$/i.test(asset.name);
       let bytes: Uint8Array | null = null;
+      if (file.size == null) {
+        // Unknown size must not skip the cap: read at most one byte past
+        // the largest allowed size, so the checks below see the overflow.
+        const handle = file.open();
+        try {
+          bytes = handle.readBytes(ZIP_LIMITS.maxArchiveBytes + 1);
+        } finally {
+          handle.close();
+        }
+      }
       if (!named || kind === 'txt') {
-        bytes = await file.bytes();
+        bytes = bytes ?? (await file.bytes());
         const head = Array.from(bytes.subarray(0, 512), (b) => String.fromCharCode(b)).join('');
         kind = named ? kind : detectImportKind(asset.name, head);
       }
@@ -86,7 +96,7 @@ export async function importFiles(assets: { uri: string; name: string }[]): Prom
         report.failed.push({ name: asset.name, reason: 'Unsupported file type' });
         continue;
       }
-      const size = bytes?.length ?? file.size ?? 0;
+      const size = bytes?.length ?? file.size ?? Number.POSITIVE_INFINITY;
       if (kind === 'zip') {
         if (size > ZIP_LIMITS.maxArchiveBytes) {
           report.failed.push({ name: asset.name, reason: 'Archive is larger than 100 MB' });
