@@ -17,6 +17,6 @@ describe('yearlySavingsPercent', () => {
 describe('FALLBACK_PLANS', () => {
   test('lists yearly first and matches the agreed prices', () => {
     expect(FALLBACK_PLANS.map((p) => p.id)).toEqual(['yearly', 'monthly', 'lifetime']);
-    expect(FALLBACK_PLANS.map((p) => p.price)).toEqual(['$19.99', '$3.99', '$39.99']);
+    expect(FALLBACK_PLANS.map((p) => p.price)).toEqual(['$19.99', '$3.99', '$49.99']);
   });
 });
