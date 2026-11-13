@@ -18,6 +18,7 @@ import type { Note, NoteSort } from '../../types';
 import { deleteTimeline } from '../timelineStore';
 import { getDb } from './database';
 import { restoredEnhancement } from '../ai/jobState';
+import { orphanedFiles } from './orphans';
 import { NOTE_COLUMNS, NoteRow, buildUpdate, normalizeLegacy, noteToRow, rowToNote, toFtsQuery } from './mapping';
 
 const LEGACY_KEY = 'transcriptions';
@@ -269,3 +270,32 @@ export async function deleteAllData(): Promise<void> {
 
 /** Raw access for other services that own their own tables (jobs). */
 export { getDb };
+
+/**
+ * Deletes recordings, timelines and waveform caches that no note references,
+ * e.g. when the app was killed during a delete's undo window. Run at launch;
+ * recordings started after `launchedAt` are never touched.
+ */
+export async function sweepOrphanFiles(launchedAt: number): Promise<void> {
+  await ready();
+  const db = await getDb();
+  const notes = await db.getAllAsync<{ id: string; audioUri: string | null }>('SELECT id, audio_uri AS audioUri FROM notes');
+  const names = (dir: Directory) => (dir.exists ? dir.list().filter((e) => e instanceof File).map((e) => e.name) : []);
+  const audioDir = new Directory(Paths.document, 'audio');
+  const timelineDir = new Directory(Paths.document, 'timelines');
+  const orphans = orphanedFiles({ audio: names(audioDir), timelines: names(timelineDir) }, notes, launchedAt);
+  for (const name of orphans.audio) {
+    try {
+      new File(audioDir, name).delete();
+    } catch (error) {
+      console.warn('Failed to delete orphaned recording:', error);
+    }
+  }
+  for (const name of orphans.timelines) {
+    try {
+      new File(timelineDir, name).delete();
+    } catch (error) {
+      console.warn('Failed to delete orphaned timeline:', error);
+    }
+  }
+}

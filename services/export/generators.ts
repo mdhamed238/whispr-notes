@@ -132,8 +132,8 @@ export function toMarkdown(
     `title: ${yamlString(note.title)}`,
     `date: ${note.createdAt.toISOString()}`,
     note.duration > 0 ? `duration: ${formatClock(note.duration)}` : null,
-    note.tags.length > 0 ? `tags: [${note.tags.join(', ')}]` : null,
-    note.language ? `language: ${note.language}` : null,
+    note.tags.length > 0 ? `tags: [${note.tags.map(yamlString).join(', ')}]` : null,
+    note.language ? `language: ${yamlString(note.language)}` : null,
     'source: WhisprNotes',
     '---',
   ]
