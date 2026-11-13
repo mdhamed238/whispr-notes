@@ -1,6 +1,6 @@
 # Terms of Use
 
-**Effective date:** November 12, 2026
+**Effective date:** November 13, 2026
 
 These terms are an agreement between you and Mohamed Hamed, the independent developer of WhisprNotes ("I", "me"). By using the app you agree to them.
 
@@ -22,10 +22,10 @@ Transcripts, titles and summaries are produced automatically by AI models runnin
 
 ## WhisprNotes Pro
 
-- Pro is available as an auto-renewing subscription (monthly or yearly) or as a one-time lifetime purchase. Prices are shown in the app before you buy.
+- Pro is available as a one-time lifetime purchase with a $4.99 USD base price. Your local store price is shown in the app before you buy. The lifetime purchase does not renew or require a subscription.
 - Payment is charged to your App Store or Google Play account when you confirm the purchase.
-- **Subscriptions renew automatically** at the end of each period unless you cancel at least 24 hours before it ends. You can manage or cancel in your store account settings.
-- If a free trial is offered, you are charged when it ends unless you cancel before then. Any unused part of a trial is forfeited when you buy a subscription.
+- You can restore a lifetime purchase using the same App Store or Google Play account.
+- If you previously bought a subscription, its existing store terms still apply. You can manage or cancel it in your store account settings; your existing Pro entitlement remains valid while active.
 - Refunds are handled by Apple or Google under their policies.
 - The free version includes a limited number of AI summaries per week; that limit may change.
 

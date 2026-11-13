@@ -22,7 +22,8 @@ import { FontSize, Spacing } from '@/constants/Spacing';
 import { Radius, Shadow } from '@/constants/theme';
 import * as notesRepo from '@/services/db/notesRepo';
 import * as enhanceQueue from '@/services/ai/enhanceQueue';
-import { useSettings } from '@/services/settings';
+import { RecordingControls, type RecordingPhase } from '@/services/recordingControls';
+import { consumeLiveTranscript } from '@/services/liveTranscription';
 import { runHarness } from '@/services/transcriptionHarness';
 import { WavFileWriter } from '@/services/wavEncoder';
 import { Note } from '@/types';
@@ -34,6 +35,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -114,8 +116,6 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
   const sheet = useActionSheet();
-  const [settings] = useSettings();
-  const nonEnglish = settings.transcriptionLanguage !== 'auto' && settings.transcriptionLanguage !== 'en';
   const toast = useToast();
 
   // react-native-audio-api 0.13 moved buffer configuration off the
@@ -123,11 +123,6 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
   // parameterless and the capture format is declared at registration below.
   const [recorder] = useState(() => new AudioRecorder());
 
-  // VAD-gated streaming (added in v0.9.0) commits text once a short silence
-  // is detected instead of endlessly re-transcribing a growing buffer on
-  // every iteration — this is what actually cuts the multi-second commit
-  // lag down, not just the library bump itself.
-  //
   // English-only export. The multilingual `whisper_base()` (EN/FR/AR via a
   // `language` option on stream()) was tried and reverted: it threw
   // "[Whisper] The 'decode' method did not succeed" on device. That is not a
@@ -138,7 +133,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
   // restore the language picker — note the library throws if `language` is
   // passed to a non-multilingual model, so those two must change together.
   const model = useSpeechToText({
-    vad: models.vad.fsmn_vad(),
+    vad: STREAMING_CONFIG.USE_VAD ? models.vad.fsmn_vad() : undefined,
     model: models.speech_to_text.whisper_base_en(),
   });
 
@@ -179,31 +174,25 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
     duration: 0,
   });
   const [isSaving, setIsSaving] = useState(false);
-  // Bug fix: handleStopStreaming does async work (deleting a superseded
-  // capture) but nothing used to disable Save while that was in flight. The
-  // render condition that shows Save only checked `!model.isGenerating`,
-  // which flips true the instant streamStop() runs — tapping Save in that
-  // window could save a note out from under the real recording.
-  const [isCapturingAudio, setIsCapturingAudio] = useState(false);
+  const savingRef = useRef(false);
+  const mountedRef = useRef(true);
+  const [phase, setPhase] = useState<RecordingPhase>('idle');
+  const [controls] = useState(() => new RecordingControls((next) => {
+    if (mountedRef.current) setPhase(next);
+  }));
+  const streamTaskRef = useRef<Promise<string> | null>(null);
+  const capturedUriRef = useRef<string | null>(null);
 
   // Dev-only fixture run (see services/transcriptionHarness).
   const [isRunningHarness, setIsRunningHarness] = useState(false);
 
-  // useSpeechToText raises `isGenerating` for transcribe() as well as
-  // stream(), so during the post-save timeline pass — and during a harness
-  // run, which drives both — the model reports itself as generating even
-  // though nothing is being recorded. Without this the record button would
-  // show its stop state and tapping it would call handleStopStreaming
-  // against an inference that isn't a recording.
-  const isRecording = model.isGenerating && !isRunningHarness;
+  // Microphone state is independent of inference, which can still be
+  // flushing its last words after capture has stopped.
+  const isRecording = phase === 'recording';
+  const isTransitioning = phase === 'starting' || phase === 'stopping';
 
   // Runaway guard: force-stops a recording left running by accident.
   const maxDurationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Bug fix: stop can be triggered from three places at once (the stop
-  // button, the max-duration timer, and the stream error path). Without
-  // this guard a double-stop could finalize the WAV twice and clobber the
-  // freshly-captured file with a null result.
-  const isStoppingRef = useRef(false);
 
   // Read through a ref by the once-registered interruption listener so it
   // always sees the current recording state.
@@ -213,7 +202,9 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
   const stickToBottomRef = useRef(true);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
       if (maxDurationTimer.current) {
         clearTimeout(maxDurationTimer.current);
       }
@@ -221,6 +212,11 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       // open here belongs to a recording that will never be saved.
       writerRef.current?.discard();
       writerRef.current = null;
+      modelRef.current.streamStop();
+      void recorder.stop().catch((error) => console.warn('Recorder cleanup failed:', error));
+      const uri = capturedUriRef.current;
+      // A save still in flight owns this file until its database write settles.
+      if (uri && !savingRef.current) void FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => undefined);
       enhanceQueue.setRecordingActive(false);
     };
   }, []);
@@ -272,8 +268,13 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
           }
 
           const channelData = buffer.getChannelData(0);
-          modelRef.current.streamInsert(channelData);
           writerRef.current?.write(channelData);
+          // A failed live preview must not prevent saving the source audio.
+          try {
+            modelRef.current.streamInsert(channelData);
+          } catch (error) {
+            console.warn('Live audio insert failed:', error);
+          }
 
           let sumSquares = 0;
           for (let i = 0; i < channelData.length; i++) {
@@ -295,6 +296,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
 
     return () => {
       interruption?.remove();
+      recorder.clearOnAudioReady();
     };
     // Registered once per session (see the remount-key comment above), not
     // re-registered on every Start press.
@@ -302,163 +304,135 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
   }, []);
 
   const handleStartStreaming = async () => {
+    if (controls.phase !== 'idle' || savingRef.current || isRunningHarness || !modelRef.current.isReady) return;
     try {
-      // Bug fix: this result was previously ignored — a denied permission
-      // failed silently instead of telling the user anything.
-      const permission = await AudioManager.requestRecordingPermissions();
-      if (permission !== 'Granted') {
-        Alert.alert('Permission Required', ERROR_MESSAGES.MICROPHONE_PERMISSION_DENIED);
-        return;
-      }
+      const started = await controls.start(async () => {
+        const permission = await AudioManager.requestRecordingPermissions();
+        if (!mountedRef.current) return false;
+        if (permission !== 'Granted') {
+          Alert.alert('Permission Required', ERROR_MESSAGES.MICROPHONE_PERMISSION_DENIED);
+          return false;
+        }
 
-      transcriptRef.current = { committed: '', nonCommitted: '' };
-      setTranscript({ committed: '', nonCommitted: '' });
-      stickToBottomRef.current = true;
-      isStoppingRef.current = false;
+        // Keep the motor out of the captured audio, including the first word.
+        await haptic('medium');
+        if (!mountedRef.current) return false;
+        writerRef.current?.discard();
+        writerRef.current = WavFileWriter.create(AUDIO_CONFIG.sampleRate);
+        enhanceQueue.setRecordingActive(true);
+        const result = await recorder.start();
+        if (result.status === 'error') throw new Error(result.message);
+        if (!mountedRef.current) {
+          await recorder.stop();
+          return false;
+        }
 
-      // Any writer still open here is from a stop that failed partway; drop
-      // its partial file rather than leaking it.
-      writerRef.current?.discard();
-      writerRef.current = WavFileWriter.create(AUDIO_CONFIG.sampleRate);
-
-      // Fired *before* the microphone goes live, and awaited, so the motor
-      // has run and settled before the first buffer is captured.
-      //
-      // This haptic is a physical vibration of the same device the
-      // microphone is in, so ordering it after start() recorded the buzz
-      // into the first ~100ms of every take — over the first word. The
-      // damage is in the WAV itself, not just the live stream: a one-shot
-      // transcribe() of a saved "Hi everyone" returns "Bye everyone", and
-      // the streamed pass returns "Bye. (buzzer)" — `(buzzer)` being
-      // Whisper's sound tag for exactly this kind of mechanical noise.
-      //
-      // It reached that position as a fix for the opposite bug: it used to
-      // sit after `await model.stream()`, which doesn't resolve until
-      // streaming *stops*, so the "start" haptic actually fired at stop time
-      // (double-buzzing alongside handleStopStreaming's own) and start was
-      // silent. Both constraints are satisfied here — before start(), not
-      // after stream().
-      await haptic('medium');
-
-      // 0.13 made start() async and report failure through a Result instead
-      // of throwing. Unchecked, a refused start would leave the model
-      // streaming against a microphone that never delivers a buffer — an
-      // app that looks like it is recording and silently produces nothing.
-      const started = await recorder.start();
-      if (started.status === 'error') {
+        transcriptRef.current = { committed: '', nonCommitted: '' };
+        setTranscript({ ...transcriptRef.current });
+        stickToBottomRef.current = true;
+        return true;
+      });
+      if (!started) {
         writerRef.current?.discard();
         writerRef.current = null;
-        console.error('Failed to start recorder:', started.message);
-        Alert.alert('Error', ERROR_MESSAGES.RECORDING_FAILED);
+        enhanceQueue.setRecordingActive(false);
         return;
       }
-      // Background AI passes wait while the microphone is live.
-      enhanceQueue.setRecordingActive(true);
 
-      if (maxDurationTimer.current) {
-        clearTimeout(maxDurationTimer.current);
-      }
       maxDurationTimer.current = setTimeout(() => {
         maxDurationTimer.current = null;
-        handleStopStreaming();
+        void handleStopStreaming();
         Alert.alert('Recording Stopped', 'Maximum recording length reached.');
       }, UI_CONFIG.MAX_RECORDING_DURATION_SECONDS * 1000);
 
-      try {
-        // Both knobs live in STREAMING_CONFIG so the CPU/latency trade-off
-        // can be profiled by editing one place. vadDetectionMargin is 300ms
-        // (down from the library's 500ms): shorter silence gaps count as a
-        // commit point, so continuous speech with only brief pauses still
-        // gets incremental commits instead of holding everything as
-        // non-committed until a long enough gap flushes it all at once.
-        const streamIter = model.stream({
-          useVAD: true,
-          timeout: STREAMING_CONFIG.INFERENCE_TIMEOUT_MS,
-          vadDetectionMargin: STREAMING_CONFIG.VAD_DETECTION_MARGIN_MS,
-        });
-        for await (const { committed, nonCommitted } of streamIter) {
-          if (committed.text) {
-            transcriptRef.current.committed += committed.text;
-          }
-          transcriptRef.current.nonCommitted = nonCommitted.text ?? '';
-          setTranscript({ ...transcriptRef.current });
-        }
-      } catch (error) {
+      // Retain the task: streamStop requests a flush but does not await it.
+      const task = consumeLiveTranscript(modelRef.current.stream({
+        useVAD: STREAMING_CONFIG.USE_VAD,
+        timeout: STREAMING_CONFIG.INFERENCE_TIMEOUT_MS,
+        vadDetectionMargin: STREAMING_CONFIG.VAD_DETECTION_MARGIN_MS,
+      }), (update) => {
+        transcriptRef.current = update;
+        if (mountedRef.current) setTranscript(update);
+      });
+      streamTaskRef.current = task;
+      void task.then(() => {
+        // Also finalize if the engine ends streaming on its own.
+        if (mountedRef.current && controls.phase === 'recording') void handleStopStreaming();
+      }, (error) => {
         console.error('Transcription error:', error);
-        handleStopStreaming();
-
-        if (error instanceof Error && error.message?.includes('BLANK')) {
-          Alert.alert('No Speech Detected', 'Please speak clearly into the microphone.');
-        } else {
-          Alert.alert('Transcription Error', 'Failed to transcribe audio. Please try again.');
-        }
-      }
+        if (!mountedRef.current) return;
+        void handleStopStreaming();
+        toast.show({ message: 'Live preview failed. You can still save the audio for final transcription.', tone: 'error', durationMs: 6000 });
+      });
     } catch (error) {
       console.error('Failed to start streaming:', error);
       writerRef.current?.discard();
       writerRef.current = null;
-      Alert.alert('Error', ERROR_MESSAGES.RECORDING_FAILED);
+      enhanceQueue.setRecordingActive(false);
+      if (mountedRef.current) Alert.alert('Error', ERROR_MESSAGES.RECORDING_FAILED);
     }
   };
 
   const handleStopStreaming = async () => {
-    if (isStoppingRef.current) return;
-    isStoppingRef.current = true;
-
-    setIsCapturingAudio(true);
     try {
-      // Awaited before the WAV is finalized below: stop() is async in 0.13,
-      // and buffers already in flight are still delivered to onAudioReady
-      // until it settles. Finalizing first would null the writer out from
-      // under them and silently drop the tail of the recording.
-      const stopped = await recorder.stop();
-      if (stopped.status === 'error') {
-        console.warn('Recorder stop reported an error:', stopped.message);
-      }
-      model.streamStop();
-      enhanceQueue.setRecordingActive(false);
-      audioLevel.value = 0;
-
-      if (maxDurationTimer.current) {
-        clearTimeout(maxDurationTimer.current);
-        maxDurationTimer.current = null;
-      }
-
-      // Bug fix: a previously-captured-but-unsaved WAV from an earlier stop
-      // in this same session would otherwise be silently orphaned on disk
-      // the moment `captured` below is overwritten with the new file.
-      if (captured.audioUri) {
-        try {
-          await FileSystem.deleteAsync(captured.audioUri, { idempotent: true });
-        } catch (error) {
-          console.warn('Failed to delete previous captured audio:', error);
+      await controls.stop(async () => {
+        if (maxDurationTimer.current) {
+          clearTimeout(maxDurationTimer.current);
+          maxDurationTimer.current = null;
         }
-      }
+        try {
+          // Capture ends before transcription finishes. Keep the button busy
+          // until both the native recorder and the final stream update settle.
+          const stopped = await recorder.stop();
+          if (stopped.status === 'error') {
+            if (recorder.isRecording()) throw new Error(stopped.message);
+            console.warn('Recorder stop reported an error:', stopped.message);
+          }
+        } catch (error) {
+          if (recorder.isRecording()) throw error;
+          console.warn('Recorder already stopped:', error);
+        }
+        modelRef.current.streamStop();
+        audioLevel.value = 0;
+        try {
+          await streamTaskRef.current;
+        } catch (error) {
+          // The WAV remains useful even if inference fails.
+          console.warn('Could not finish live transcript:', error);
+        } finally {
+          streamTaskRef.current = null;
+          enhanceQueue.setRecordingActive(false);
+        }
 
-      // Just a 44-byte header patch — the PCM was already written to disk
-      // as it arrived, so there is no encode pass to block on here.
-      const writer = writerRef.current;
-      writerRef.current = null;
-      const result = writer ? writer.finalize() : null;
-
-      setCaptured(
-        result
-          ? { audioUri: result.uri, duration: result.durationSeconds }
-          : { audioUri: null, duration: 0 }
-      );
-
-      void haptic('light');
+        const writer = writerRef.current;
+        writerRef.current = null;
+        const result = writer ? writer.finalize() : null;
+        const previousUri = capturedUriRef.current;
+        capturedUriRef.current = result?.uri ?? null;
+        if (previousUri) {
+          await FileSystem.deleteAsync(previousUri, { idempotent: true }).catch((error) => {
+            console.warn('Failed to delete previous captured audio:', error);
+          });
+        }
+        if (mountedRef.current) {
+          setCaptured(result
+            ? { audioUri: result.uri, duration: result.durationSeconds }
+            : { audioUri: null, duration: 0 });
+          void haptic('light');
+        } else if (result) {
+          await FileSystem.deleteAsync(result.uri, { idempotent: true }).catch(() => undefined);
+        }
+      });
     } catch (error) {
-      console.error('Failed to stop streaming:', error);
-    } finally {
-      setIsCapturingAudio(false);
-      isStoppingRef.current = false;
+      console.error('Failed to stop recording:', error);
+      if (mountedRef.current) toast.show({ message: 'Could not stop recording. Please tap Stop again.', tone: 'error' });
     }
   };
 
   interruptionHandlerRef.current = () => {
-    if (!isRecording) return;
+    if (controls.phase !== 'recording') return;
     void handleStopStreaming().then(() => {
+      if (!mountedRef.current || controls.phase !== 'idle') return;
       void haptic('warning');
       toast.show({ message: 'Recording stopped by an interruption. Save it or record again.', durationMs: 6000 });
     });
@@ -501,18 +475,21 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
   };
 
   const handleSaveTranscription = async () => {
-    if (!transcript.committed) {
-      Alert.alert('No Transcription', 'Nothing to save. Try recording some speech first.');
+    if (controls.phase !== 'idle' || savingRef.current) return;
+    const text = (transcriptRef.current.committed + transcriptRef.current.nonCommitted).trim();
+    if (!text && !captured.audioUri) {
+      Alert.alert('No Recording', 'Nothing to save. Try recording some speech first.');
       return;
     }
 
+    savingRef.current = true;
     setIsSaving(true);
     try {
       const now = new Date();
       const note: Note = {
         id: now.getTime().toString(),
-        title: buildAutoTitle(transcript.committed),
-        transcription: transcript.committed,
+        title: buildAutoTitle(text),
+        transcription: text,
         audioUri: captured.audioUri,
         duration: captured.duration,
         tags: [],
@@ -529,9 +506,15 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
       };
 
       await notesRepo.createNote(note);
+      // Ownership transfers to the saved note, so remount cleanup keeps it.
+      capturedUriRef.current = null;
       // The enhanced transcript, timings and summary are background work
       // on the saved note (services/ai/enhanceQueue); the user moves on now.
-      if (note.audioUri) await enhanceQueue.enqueue(note.id, 'enhance');
+      if (note.audioUri) {
+        await enhanceQueue.enqueue(note.id, 'enhance').catch((error) => {
+          console.warn('Note saved, but could not queue final transcription:', error);
+        });
+      }
       void haptic('success');
 
       // The note is saved and the user moves on immediately — the timeline
@@ -543,7 +526,14 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
     } catch (error) {
       console.error('Failed to save note:', error);
       void haptic('error');
+      if (!mountedRef.current) {
+        const uri = capturedUriRef.current;
+        capturedUriRef.current = null;
+        if (uri) await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => undefined);
+        return;
+      }
       Alert.alert('Error', 'Failed to save note');
+      savingRef.current = false;
       setIsSaving(false);
     }
   };
@@ -556,9 +546,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
     });
 
   const handleReset = async () => {
-    if (isRecording) {
-      await handleStopStreaming();
-    }
+    if (controls.phase !== 'idle' || savingRef.current) return;
     // Bug fix: Reset used to discard `captured` (and the whole session, via
     // remount) without deleting the WAV file already written to disk at
     // captured.audioUri, orphaning it — only a saved note's audio should
@@ -594,7 +582,10 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
   }));
 
   const hasTranscript = Boolean(transcript.committed || transcript.nonCommitted);
-  const wordCount = useMemo(() => countWords(transcript.committed), [transcript.committed]);
+  const wordCount = useMemo(
+    () => countWords(transcript.committed + transcript.nonCommitted),
+    [transcript.committed, transcript.nonCommitted]
+  );
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -629,12 +620,14 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
             <View style={styles.recordButtonContainer}>
               <PulseRecordButton
                 isRecording={isRecording}
-                disabled={!model.isReady || isSaving}
+                busy={isTransitioning}
+                disabled={!model.isReady || isSaving || isRunningHarness || isTransitioning}
                 onPress={isRecording ? handleStopStreaming : handleStartStreaming}
                 colors={colors}
               />
               <RecordingStatus
                 isRecording={isRecording}
+                phase={phase}
                 level={audioLevel}
                 colors={colors}
                 styles={styles}
@@ -645,7 +638,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
                   icon="flask"
                   variant="secondary"
                   loading={isRunningHarness}
-                  disabled={!model.isReady || isRecording || isRunningHarness}
+                  disabled={!model.isReady || phase !== 'idle' || isRunningHarness || isSaving}
                   onPress={handleRunHarness}
                   style={styles.harnessButton}
                 />
@@ -655,7 +648,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
             <Card style={styles.transcriptionCard} elevation="sm">
               <View style={styles.transcriptionHeader}>
                 <Text style={styles.transcriptionLabel}>
-                  {isRecording ? 'Listening…' : 'Transcription'}
+                  {isRecording ? 'Live preview · English' : phase === 'stopping' ? 'Finishing preview…' : 'Transcription'}
                 </Text>
                 {wordCount > 0 && (
                   <Text style={styles.wordCount}>
@@ -688,26 +681,24 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
                 )}
               </ScrollView>
 
-              {nonEnglish && (
-                <Text style={styles.languageHint}>
-                  Live preview is English-only. The saved note is transcribed in your language.
-                </Text>
-              )}
+              <Text style={styles.languageHint}>
+                English live preview may change. Final transcription processes the saved audio again for accuracy.
+              </Text>
 
-              {hasTranscript && !isRecording && (
+              {(hasTranscript || captured.audioUri) && !isRecording && phase !== 'starting' && (
                 <Animated.View entering={FadeIn.duration(200)} style={styles.actionButtons}>
                   <Button
                     label={
                       isSaving
                           ? 'Saving…'
-                          : isCapturingAudio
-                            ? 'Processing audio…'
+                          : phase === 'stopping'
+                            ? 'Finishing recording…'
                             : 'Save'
                     }
                     icon="checkmark-circle"
                     variant="primary"
                     loading={isSaving}
-                    disabled={isSaving || isCapturingAudio}
+                    disabled={isSaving || phase !== 'idle' || isRunningHarness}
                     onPress={handleSaveTranscription}
                     haptic="none"
                     style={styles.saveButton}
@@ -716,7 +707,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
                     label="Reset"
                     icon="refresh"
                     variant="secondary"
-                    disabled={isSaving || isCapturingAudio}
+                    disabled={isSaving || phase !== 'idle' || isRunningHarness}
                     onPress={confirmReset}
                     style={styles.resetButton}
                   />
@@ -747,11 +738,13 @@ const CommittedTranscript = React.memo(function CommittedTranscript({
  */
 function RecordingStatus({
   isRecording,
+  phase,
   level,
   colors,
   styles,
 }: {
   isRecording: boolean;
+  phase: RecordingPhase;
   level: SharedValue<number>;
   colors: typeof Colors.light;
   styles: ReturnType<typeof createStyles>;
@@ -771,7 +764,9 @@ function RecordingStatus({
   }, [isRecording]);
 
   if (!isRecording) {
-    return <Text style={styles.recordButtonText}>Tap to start recording</Text>;
+    return <Text style={styles.recordButtonText} accessibilityLiveRegion="polite">
+      {phase === 'starting' ? 'Starting recording…' : phase === 'stopping' ? 'Finishing recording…' : 'Tap to start recording'}
+    </Text>;
   }
 
   return (
@@ -786,11 +781,13 @@ const RECORD_SIZE = 128;
 
 function PulseRecordButton({
   isRecording,
+  busy = false,
   disabled,
   onPress,
   colors,
 }: {
   isRecording: boolean;
+  busy?: boolean;
   disabled?: boolean;
   onPress: () => void;
   colors: typeof Colors.light;
@@ -834,6 +831,9 @@ function PulseRecordButton({
       />
       <AnimatedPressable
         disabled={disabled}
+        accessibilityRole="button"
+        accessibilityLabel={busy ? 'Processing recording' : isRecording ? 'Stop recording' : 'Start recording'}
+        accessibilityState={{ disabled, busy }}
         scaleTo={0.94}
         haptic="none"
         onPress={onPress}
@@ -842,10 +842,13 @@ function PulseRecordButton({
           {
             backgroundColor: isRecording ? colors.danger : colors.card,
             borderColor: isRecording ? colors.danger : colors.border,
+            opacity: disabled ? 0.45 : 1,
           },
         ]}
       >
-        <Ionicons name={isRecording ? 'stop' : 'mic'} size={44} color={isRecording ? colors.onAccent : colors.danger} />
+        {busy ? <ActivityIndicator size="large" color={colors.danger} /> : (
+          <Ionicons name={isRecording ? 'stop' : 'mic'} size={44} color={isRecording ? colors.onAccent : colors.danger} />
+        )}
       </AnimatedPressable>
     </View>
   );

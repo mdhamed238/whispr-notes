@@ -6,7 +6,7 @@ Private voice notes and meeting summaries, transcribed **on your phone**. Live W
 
 ## Features
 
-- **Live transcript** as you speak (Whisper Base EN + VAD, ExecuTorch).
+- **English live preview** as you speak (Whisper Base EN, ExecuTorch). The saved audio is transcribed again for final accuracy; Pro can use a larger model.
 - **Enhanced transcript** after recording: Whisper **Large-v3 Turbo** (whisper.cpp) on flagship phones, Whisper Small on mid-range, Base on the rest. Word-level timings: tap any word to replay it. 99 languages with Large-v3.
 - **AI summaries and titles**, on-device (Qwen3 1.7B / 0.6B via ExecuTorch): overview, key points, action items, decisions. Long meetings are summarized in parts and merged.
 - **Notes**: full-text search (SQLite FTS5) across transcripts, summaries and tags; tag filters; sort; swipe to pin or delete with undo; long-press menu.
@@ -14,7 +14,7 @@ Private voice notes and meeting summaries, transcribed **on your phone**. Live W
 - **Export & share**: branded PDF, Markdown (with front matter and task checkboxes), text, SRT subtitles, original audio; summary-only or full; optional timestamps. One-tap Markdown zip backup of everything.
 - **Import**: Markdown, text, Evernote `.enex`, and `.zip` exports from Notion, Obsidian or Bear. "Open in WhisprNotes" from other apps. Duplicates skipped.
 - **Insights**: minutes recorded, words, streaks, speaking pace, typing time saved, 14-day chart, time-of-day heatmap, top tags. Computed on the phone.
-- **Pro** (RevenueCat): monthly, yearly with trial, or lifetime. Free tier: unlimited recording, AI titles, 3 summaries a week, text export.
+- **Pro** (RevenueCat): one $4.99 lifetime purchase (USD base; local store prices vary). Free tier: unlimited recording, AI titles, 3 summaries a week, text export.
 - **Trust**: onboarding that explains the one-time model downloads, bundled Privacy Policy, Terms and "What's stored" pages, delete-all-data.
 - **Feel**: consistent haptics (toggleable), toasts with undo, bottom sheets, native transitions, reduced-motion support, light and dark themes.
 
@@ -77,7 +77,7 @@ yarn typecheck
 
 ## Before you ship
 
-1. **RevenueCat:** create the project; entitlement `pro`; products `whisprnotes_pro_monthly`, `whisprnotes_pro_yearly` (with intro trial), `whisprnotes_pro_lifetime`; an offering with monthly/annual/lifetime packages. Put the public SDK keys in `app.json` → `expo.extra.revenueCat`.
+1. **RevenueCat:** create the project; entitlement `pro`; one product `whisprnotes_pro_lifetime` at $4.99 USD base (non-consumable on iOS, one-time product on Google Play); a current offering with only the lifetime package. Preserve any existing product-to-`pro` mappings so previous purchases retain their entitlement. Put the public SDK keys in `app.json` → `expo.extra.revenueCat`.
 2. **Website:** live at https://whisprnotes-app.vercel.app (privacy: `/privacy`, terms: `/terms`, support: `/support`). To update: `yarn website`, then from `website/` run `vercel deploy --prod` (with `--token` if `vercel login` fails on a Mac name containing ’). When you buy a domain, update `WEBSITE_URL` in `constants/config.ts` and `docs/store/listing.md`.
 3. **Legal:** fill in the governing-law country and have the documents reviewed (see `docs/legal/README.md`).
 4. **Stores:** copy and privacy answers in `docs/store/listing.md`.
