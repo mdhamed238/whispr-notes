@@ -85,7 +85,8 @@
             }
           ]
         }
-      ]
+      ],
+      "versionCode": 1
     },
     "web": {
       "bundler": "metro",
@@ -118,6 +119,11 @@
         {
           "ios": {
             "deploymentTarget": "17.0"
+          },
+          "android": {
+            "buildArchs": [
+              "arm64-v8a"
+            ]
           }
         }
       ],
