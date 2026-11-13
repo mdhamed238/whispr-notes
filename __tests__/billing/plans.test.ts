@@ -2,7 +2,7 @@ import { FALLBACK_PLANS, yearlySavingsPercent } from '../../services/billing/pla
 
 describe('yearlySavingsPercent', () => {
   test('compares a year of monthly with the yearly price', () => {
-    expect(yearlySavingsPercent(7.99, 49.99)).toBe(48);
+    expect(yearlySavingsPercent(3.99, 19.99)).toBe(58);
   });
   test('no saving shows nothing', () => {
     expect(yearlySavingsPercent(5, 60)).toBeNull();
@@ -17,6 +17,6 @@ describe('yearlySavingsPercent', () => {
 describe('FALLBACK_PLANS', () => {
   test('lists yearly first and matches the agreed prices', () => {
     expect(FALLBACK_PLANS.map((p) => p.id)).toEqual(['yearly', 'monthly', 'lifetime']);
-    expect(FALLBACK_PLANS.map((p) => p.price)).toEqual(['$49.99', '$7.99', '$99.99']);
+    expect(FALLBACK_PLANS.map((p) => p.price)).toEqual(['$19.99', '$3.99', '$39.99']);
   });
 });

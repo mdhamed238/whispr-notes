@@ -19,9 +19,9 @@ export interface PlanDisplay {
 
 /** Shown when the store can't be reached; real prices come from the store. */
 export const FALLBACK_PLANS: PlanDisplay[] = [
-  { id: 'yearly', title: 'Yearly', price: '$49.99', period: 'per year' },
-  { id: 'monthly', title: 'Monthly', price: '$7.99', period: 'per month' },
-  { id: 'lifetime', title: 'Lifetime', price: '$99.99', period: 'one time' },
+  { id: 'yearly', title: 'Yearly', price: '$19.99', period: 'per year' },
+  { id: 'monthly', title: 'Monthly', price: '$3.99', period: 'per month' },
+  { id: 'lifetime', title: 'Lifetime', price: '$39.99', period: 'one time' },
 ];
 
 /** Whole-percent saving of yearly over twelve months, or null when there is none. */

@@ -138,8 +138,8 @@ const home = `
     </div>
     <div class="plan pro">
       <h3>Pro</h3>
-      <div class="price">$49.99 <small>/ year</small></div>
-      <div style="color:var(--muted);font-size:15px">or $7.99 / month · $99.99 once, forever</div>
+      <div class="price">$19.99 <small>/ year</small></div>
+      <div style="color:var(--muted);font-size:15px">or $3.99 / month · $39.99 once, forever</div>
       <ul>
         <li>Whisper Large-v3 accuracy, 99 languages</li>
         <li>Unlimited AI summaries</li>
