@@ -279,7 +279,7 @@ async function runStreamed(model: HarnessModel, waveform: Float32Array): Promise
 
   const consumer = (async () => {
     const iterator = model.stream({
-      useVAD: true,
+      useVAD: STREAMING_CONFIG.USE_VAD,
       timeout: STREAMING_CONFIG.INFERENCE_TIMEOUT_MS,
       vadDetectionMargin: STREAMING_CONFIG.VAD_DETECTION_MARGIN_MS,
     });

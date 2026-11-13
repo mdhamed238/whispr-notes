@@ -1,42 +1,83 @@
-import { FALLBACK_PLANS, yearlySavingsPercent } from '../../services/billing/plans';
+import type { PurchasesOffering, PurchasesPackage } from 'react-native-purchases';
+import { lifetimePlanFromOffering } from '../../services/billing/plans';
 
-describe('yearlySavingsPercent', () => {
-  test('compares a year of monthly with the yearly price', () => {
-    expect(yearlySavingsPercent(3.99, 19.99)).toBe(58);
-  });
-  test('no saving shows nothing', () => {
-    expect(yearlySavingsPercent(5, 60)).toBeNull();
-    expect(yearlySavingsPercent(5, 70)).toBeNull();
-  });
-  test('missing prices show nothing', () => {
-    expect(yearlySavingsPercent(null, 49.99)).toBeNull();
-    expect(yearlySavingsPercent(0, 49.99)).toBeNull();
-  });
-});
+function storePackage(kind: 'monthly' | 'yearly' | 'lifetime', priceString: string): PurchasesPackage {
+  const recurring = kind !== 'lifetime';
+  const context = { offeringIdentifier: 'default', placementIdentifier: null, targetingContext: null };
+  return {
+    identifier: kind === 'yearly' ? '$rc_annual' : `$rc_${kind}`,
+    packageType: (kind === 'yearly' ? 'ANNUAL' : kind.toUpperCase()) as PurchasesPackage['packageType'],
+    offeringIdentifier: 'default',
+    presentedOfferingContext: context,
+    webCheckoutUrl: null,
+    product: {
+      identifier: `whisprnotes_pro_${kind}`,
+      title: `WhisprNotes Pro ${kind}`,
+      description: 'Pro features',
+      price: 4.99,
+      priceString,
+      currencyCode: 'EUR',
+      pricePerWeek: null,
+      pricePerMonth: null,
+      pricePerYear: null,
+      pricePerWeekString: null,
+      pricePerMonthString: null,
+      pricePerYearString: null,
+      introPrice: null,
+      discounts: null,
+      productCategory: (recurring ? 'SUBSCRIPTION' : 'NON_SUBSCRIPTION') as PurchasesPackage['product']['productCategory'],
+      productType: (recurring ? 'AUTO_RENEWABLE_SUBSCRIPTION' : 'NON_CONSUMABLE') as PurchasesPackage['product']['productType'],
+      subscriptionPeriod: recurring ? (kind === 'monthly' ? 'P1M' : 'P1Y') : null,
+      defaultOption: null,
+      subscriptionOptions: null,
+      presentedOfferingIdentifier: 'default',
+      presentedOfferingContext: context,
+      installmentsInfo: null,
+    },
+  };
+}
 
-describe('FALLBACK_PLANS', () => {
-  test('lists yearly first and matches the agreed prices', () => {
-    expect(FALLBACK_PLANS.map((p) => p.id)).toEqual(['yearly', 'monthly', 'lifetime']);
-    expect(FALLBACK_PLANS.map((p) => p.price)).toEqual(['$19.99', '$3.99', '$49.99']);
-  });
-});
+const monthly = storePackage('monthly', '3,99 €');
+const annual = storePackage('yearly', '19,99 €');
+const lifetime = storePackage('lifetime', '5,99 €');
 
-describe('trialLabel', () => {
-  const { trialLabel } = require('../../services/billing/plans');
-  test('free intro offers become a readable trial label', () => {
-    expect(trialLabel({ price: 0, periodNumberOfUnits: 3, periodUnit: 'DAY' })).toBe('3-day free trial');
-    expect(trialLabel({ price: 0, periodNumberOfUnits: 7, periodUnit: 'DAY' })).toBe('7-day free trial');
-    expect(trialLabel({ price: 0, periodNumberOfUnits: 1, periodUnit: 'WEEK' })).toBe('1-week free trial');
-  });
-  test('paid or missing intro offers are not trials', () => {
-    expect(trialLabel({ price: 0.99, periodNumberOfUnits: 1, periodUnit: 'MONTH' })).toBeUndefined();
-    expect(trialLabel(null)).toBeUndefined();
-  });
-});
+function offering(packages: PurchasesPackage[]): PurchasesOffering {
+  return {
+    identifier: 'default',
+    serverDescription: 'Pro',
+    metadata: {},
+    availablePackages: packages,
+    lifetime: packages.find((pkg) => pkg.packageType === 'LIFETIME') ?? null,
+    annual: packages.find((pkg) => pkg.packageType === 'ANNUAL') ?? null,
+    monthly: packages.find((pkg) => pkg.packageType === 'MONTHLY') ?? null,
+    sixMonth: null,
+    threeMonth: null,
+    twoMonth: null,
+    weekly: null,
+    webCheckoutUrl: null,
+  };
+}
 
-describe('fallback trials', () => {
-  test('monthly has a 3-day trial and yearly a 7-day trial', () => {
-    const byId = Object.fromEntries(FALLBACK_PLANS.map((p) => [p.id, p.trial]));
-    expect(byId).toEqual({ yearly: '7-day free trial', monthly: '3-day free trial', lifetime: undefined });
+describe('lifetimePlanFromOffering', () => {
+  test('selects lifetime from a mixed offering and preserves its localized store price', () => {
+    const plan = lifetimePlanFromOffering(offering([monthly, annual, lifetime]));
+    expect(plan.pkg).toBe(lifetime);
+    expect(plan.price).toBe('5,99 €');
+    expect(plan.period).toBe('one time');
+  });
+
+  test('has no purchasable package when only recurring products are offered', () => {
+    const plan = lifetimePlanFromOffering(offering([annual, monthly]));
+    expect(plan.pkg).toBeNull();
+  });
+
+  test('has no purchasable package when the offering is empty', () => {
+    expect(lifetimePlanFromOffering(offering([])).pkg).toBeNull();
+  });
+
+  test('shows the USD reference price without a purchasable package while offline', () => {
+    const plan = lifetimePlanFromOffering(null);
+    expect(plan.price).toBe('$4.99');
+    expect(plan.pkg).toBeNull();
   });
 });

@@ -7,7 +7,7 @@ import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import type { PurchasesOffering, PurchasesPackage } from 'react-native-purchases';
+import type { PurchasesOffering } from 'react-native-purchases';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import LogoMark from '@/components/brand/LogoMark';
@@ -15,11 +15,11 @@ import Button from '@/components/ui/Button';
 import ModalHeader from '@/components/ui/ModalHeader';
 import { useToast } from '@/components/ui/Toast';
 import { useColorScheme } from '@/components/useColorScheme';
-import Colors, { Brand } from '@/constants/Colors';
+import Colors from '@/constants/Colors';
 import { FontSize, Spacing } from '@/constants/Spacing';
 import { Radius } from '@/constants/theme';
 import { usePro } from '@/hooks/usePro';
-import { FALLBACK_PLANS, PlanId, trialLabel, yearlySavingsPercent } from '@/services/billing/plans';
+import { lifetimePlanFromOffering } from '@/services/billing/plans';
 import { getCurrentOffering, isStoreConfigured, purchase, restore } from '@/services/billing/purchases';
 import { haptic } from '@/services/haptics';
 
@@ -33,46 +33,6 @@ const BENEFITS: { icon: IconName; title: string; body: string }[] = [
   { icon: 'stats-chart', title: 'Insights', body: 'Your streaks, speaking pace and time saved.' },
 ];
 
-interface PlanOption {
-  id: PlanId;
-  title: string;
-  price: string;
-  period: string;
-  badge?: string;
-  trial?: string;
-  pkg: PurchasesPackage | null;
-}
-
-function plansFromOffering(offering: PurchasesOffering | null): PlanOption[] {
-  if (!offering) return FALLBACK_PLANS.map((p) => ({ ...p, pkg: null, badge: p.id === 'yearly' ? 'Best value' : undefined }));
-  const monthly = offering.monthly;
-  const annual = offering.annual;
-  const lifetime = offering.lifetime;
-  const savings = yearlySavingsPercent(monthly?.product.price ?? null, annual?.product.price ?? null);
-  const options: PlanOption[] = [];
-  if (annual)
-    options.push({
-      id: 'yearly',
-      title: 'Yearly',
-      price: annual.product.priceString,
-      period: 'per year',
-      badge: savings ? `Save ${savings}%` : 'Best value',
-      trial: trialLabel(annual.product.introPrice),
-      pkg: annual,
-    });
-  if (monthly)
-    options.push({
-      id: 'monthly',
-      title: 'Monthly',
-      price: monthly.product.priceString,
-      period: 'per month',
-      trial: trialLabel(monthly.product.introPrice),
-      pkg: monthly,
-    });
-  if (lifetime) options.push({ id: 'lifetime', title: 'Lifetime', price: lifetime.product.priceString, period: 'one time', pkg: lifetime });
-  return options;
-}
-
 export default function PaywallScreen() {
   const colors = Colors[useColorScheme() ?? 'light'];
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -81,7 +41,6 @@ export default function PaywallScreen() {
   const { isPro } = usePro();
   const [offering, setOffering] = useState<PurchasesOffering | null>(null);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<PlanId>('yearly');
   const [busy, setBusy] = useState<'buy' | 'restore' | null>(null);
 
   useEffect(() => {
@@ -90,17 +49,16 @@ export default function PaywallScreen() {
       .finally(() => setLoading(false));
   }, []);
 
-  const plans = plansFromOffering(offering);
-  const chosen = plans.find((p) => p.id === selected) ?? plans[0];
+  const plan = lifetimePlanFromOffering(offering);
 
   const handleBuy = async () => {
-    if (!chosen?.pkg) {
-      toast.show({ message: 'The store isn\'t reachable right now. Check your connection and try again.', tone: 'error' });
+    if (!plan.pkg) {
+      toast.show({ message: 'Lifetime Pro is unavailable right now. Check your connection and try again.', tone: 'error' });
       return;
     }
     setBusy('buy');
     try {
-      const ok = await purchase(chosen.pkg);
+      const ok = await purchase(plan.pkg);
       if (ok) {
         void haptic('success');
         toast.show({ message: 'Welcome to WhisprNotes Pro.', tone: 'success' });
@@ -136,7 +94,7 @@ export default function PaywallScreen() {
           <LogoMark size={72} />
           <Text style={styles.headline}>You're on Pro</Text>
           <Text style={styles.sub}>Thank you for supporting private, on-device notes.</Text>
-          <Text style={styles.fine}>Manage or cancel your subscription in your App Store or Google Play account settings.</Text>
+          <Text style={styles.fine}>Your Pro access is active on this store account.</Text>
         </View>
       </SafeAreaView>
     );
@@ -169,53 +127,30 @@ export default function PaywallScreen() {
         {loading ? (
           <ActivityIndicator color={colors.tint} style={{ marginVertical: Spacing.xl }} />
         ) : (
-          <View style={styles.plans} accessibilityRole="radiogroup">
-            {plans.map((p) => {
-              const active = p.id === selected;
-              return (
-                <Pressable
-                  key={p.id}
-                  onPress={() => {
-                    void haptic('selection');
-                    setSelected(p.id);
-                  }}
-                  style={[styles.plan, active && styles.planActive]}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: active }}
-                >
-                  <View style={[styles.radio, active && styles.radioActive]}>{active && <View style={styles.radioDot} />}</View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.planTitle}>{p.title}</Text>
-                    {p.trial && <Text style={styles.trial}>{p.trial}</Text>}
-                  </View>
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={styles.planPrice}>{p.price}</Text>
-                    <Text style={styles.planPeriod}>{p.period}</Text>
-                  </View>
-                  {p.badge && (
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{p.badge}</Text>
-                    </View>
-                  )}
-                </Pressable>
-              );
-            })}
+          <View style={styles.plan}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.planTitle}>{plan.title}</Text>
+              <Text style={styles.planPeriod}>Every Pro feature, forever</Text>
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={styles.planPrice}>{plan.price}</Text>
+              <Text style={styles.planPeriod}>{plan.period}</Text>
+            </View>
           </View>
         )}
 
         <Button
-          label={chosen?.trial ? 'Start free trial' : chosen?.id === 'lifetime' ? 'Buy once' : 'Continue'}
+          label={!loading && !plan.pkg ? 'Purchase unavailable' : 'Buy once'}
           loading={busy === 'buy'}
-          disabled={busy !== null || loading}
+          disabled={busy !== null || loading || !plan.pkg}
           onPress={handleBuy}
           haptic="medium"
         />
 
-        <Text style={styles.fine}>
-          {chosen?.id === 'lifetime'
-            ? 'One payment, Pro forever on this store account.'
-            : `${chosen?.trial ? 'After the trial, ' : ''}${chosen?.price ?? ''} ${chosen?.period ?? ''}. Renews automatically until you cancel; cancel anytime in your store settings at least 24 hours before renewal.`}
-        </Text>
+        <Text style={styles.fine}>One payment, Pro forever on this store account. No subscription.</Text>
+        {!loading && !plan.pkg && (
+          <Text style={styles.fine}>Lifetime Pro is unavailable right now. The US base price is $4.99; your local store price will appear when available. Check your connection and reopen this screen to try again.</Text>
+        )}
         {!isStoreConfigured() && __DEV__ && (
           <Text style={[styles.fine, { color: colors.warning }]}>Developer: the store isn't configured. Use Settings → Developer: unlock Pro.</Text>
         )}
@@ -253,27 +188,19 @@ function createStyles(colors: typeof Colors.light) {
     benefitIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: `${colors.tint}1A`, alignItems: 'center', justifyContent: 'center' },
     benefitTitle: { fontSize: FontSize.md, fontWeight: '700', color: colors.text },
     benefitBody: { fontSize: FontSize.sm, color: colors.textMuted, lineHeight: 19 },
-    plans: { gap: Spacing.sm },
     plan: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: Spacing.md,
       borderRadius: Radius.lg,
       borderWidth: 1.5,
-      borderColor: colors.border,
-      backgroundColor: colors.card,
+      borderColor: colors.tint,
+      backgroundColor: `${colors.tint}0D`,
       padding: Spacing.lg,
     },
-    planActive: { borderColor: colors.tint, backgroundColor: `${colors.tint}0D` },
-    radio: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
-    radioActive: { borderColor: colors.tint },
-    radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.tint },
     planTitle: { fontSize: FontSize.md, fontWeight: '700', color: colors.text },
-    trial: { fontSize: FontSize.xs, color: colors.success, fontWeight: '700', marginTop: 2 },
     planPrice: { fontSize: FontSize.md, fontWeight: '800', color: colors.text },
     planPeriod: { fontSize: FontSize.xs, color: colors.textMuted },
-    badge: { position: 'absolute', top: -10, right: Spacing.lg, backgroundColor: Brand.coral, borderRadius: Radius.pill, paddingHorizontal: 10, paddingVertical: 3 },
-    badgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
     fine: { fontSize: FontSize.xs, color: colors.textMuted, textAlign: 'center', lineHeight: 17 },
     links: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: Spacing.sm },
     link: { fontSize: FontSize.sm, color: colors.tint, fontWeight: '600' },

@@ -138,8 +138,8 @@ const home = `
     </div>
     <div class="plan pro">
       <h3>Pro</h3>
-      <div class="price">$19.99 <small>/ year</small></div>
-      <div style="color:var(--muted);font-size:15px">7-day free trial · or $3.99 / month with a 3-day trial · $49.99 once, forever</div>
+      <div class="price">$4.99 <small>once</small></div>
+      <div style="color:var(--muted);font-size:15px">Lifetime Pro · No subscription · USD base price; local store prices vary</div>
       <ul>
         <li>Whisper Large-v3 accuracy, 99 languages</li>
         <li>Unlimited AI summaries</li>
@@ -156,7 +156,7 @@ const home = `
   <details><summary>Is my audio ever uploaded?</summary><p>No. Recording, transcription and summaries all run on your phone. The app only goes online to download its AI models once and to process purchases.</p></details>
   <details><summary>Which phones does it run on?</summary><p>iPhone with iOS 17 or later, and 64-bit Android phones. Phones with 8 GB of memory or more (like a Galaxy S23 Ultra) run Whisper Large-v3; others use a smaller model automatically.</p></details>
   <details><summary>Does it work without internet?</summary><p>Yes. After the first model download, everything works in airplane mode.</p></details>
-  <details><summary>Can I cancel anytime?</summary><p>Yes. Subscriptions are managed by Apple or Google; cancel in your store account settings and keep Pro until the end of the period.</p></details>
+  <details><summary>Is Pro a subscription?</summary><p>No. Pro is a one-time lifetime purchase with a $4.99 USD base price. Your local store price is shown before you buy. Restore your purchase with the same App Store or Google Play account.</p></details>
   <details><summary>Do I need to tell people I'm recording?</summary><p>Yes. Recording laws differ by country and often require everyone's consent. Always ask first.</p></details>
 </section>
 `;
@@ -168,7 +168,6 @@ const support = `
   <div class="contact"><code>${EMAIL}</code><span style="color:var(--muted);font-size:14px">Copy the address into your mail app</span></div>
   <h2>Common questions</h2>
   <p><strong>Restore a purchase:</strong> Settings → Upgrade to Pro → Restore purchase, signed in to the same App Store or Google Play account you bought with.</p>
-  <p><strong>Cancel a subscription:</strong> in your App Store or Google Play account's subscription settings.</p>
   <p><strong>Free up space:</strong> Settings → AI models → Remove, or delete old recordings.</p>
   <p><strong>Delete everything:</strong> Settings → Delete all data. Because your notes never leave your phone, I can't recover them for you, so back them up first (Settings → Back up all notes).</p>
   <p>Please don't email recordings or private notes; describe the problem instead.</p>

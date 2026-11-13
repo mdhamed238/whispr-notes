@@ -53,7 +53,7 @@ WhisprNotes turns meetings, lectures, interviews and spoken ideas into accurate 
 **Insights**
 • Minutes recorded, speaking pace, streaks and the hours of typing you've saved
 
-WhisprNotes Pro unlocks Large-v3 accuracy, unlimited summaries, every export format, import, backup and Insights. Choose monthly (3-day free trial), yearly (7-day free trial) or a one-time lifetime purchase. Subscriptions renew automatically unless cancelled at least 24 hours before the end of the period; manage them in your store account settings.
+WhisprNotes Pro unlocks Large-v3 accuracy, unlimited summaries, every export format, import, backup and Insights. Unlock Pro for a one-time lifetime purchase: $4.99 USD base, with localized prices shown in your store before you buy. One payment, no subscription. Restore your purchase on the same store account.
 
 Always get consent before recording others.
 

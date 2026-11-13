@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Effective date:** November 12, 2026
+**Effective date:** November 13, 2026
 
 WhisprNotes is made by Mohamed Hamed, an independent developer ("I", "me"). This policy explains what happens to your information when you use the WhisprNotes app.
 
@@ -24,7 +24,7 @@ All of this lives in the app's private storage on your device. I have no access 
 
 **AI model downloads.** The speech-recognition and summary models are downloaded from Hugging Face (huggingface.co) the first time they're needed. Like any download, the request reveals your IP address and standard technical details (such as app and OS version) to Hugging Face. No recordings, notes or personal content are sent. See the [Hugging Face privacy policy](https://huggingface.co/privacy).
 
-**Purchases.** Payments for WhisprNotes Pro are handled by Apple (App Store) or Google (Google Play). The app uses RevenueCat, Inc. to verify purchases and restore them on your devices. RevenueCat receives a random, anonymous app user ID created on your device, your purchase receipts, your device and OS type, and your IP address and country. It does not receive your name, email, recordings or notes. See the [RevenueCat privacy policy](https://www.revenuecat.com/privacy). I can see anonymous purchase records (for example, that a subscription was started) but cannot link them to you.
+**Purchases.** Payments for WhisprNotes Pro are handled by Apple (App Store) or Google (Google Play). The app uses RevenueCat, Inc. to verify purchases and restore them on your devices. RevenueCat receives a random, anonymous app user ID created on your device, your purchase receipts, your device and OS type, and your IP address and country. It does not receive your name, email, recordings or notes. See the [RevenueCat privacy policy](https://www.revenuecat.com/privacy). I can see anonymous purchase records (for example, that a lifetime purchase was made) but cannot link them to you.
 
 **Sharing and exporting.** When you share or export a note or recording, it goes only to the app or person you choose, under their own privacy terms.
 

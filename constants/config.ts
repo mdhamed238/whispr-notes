@@ -29,9 +29,13 @@ export const CAPTURE_BUFFER_SECONDS = 0.1;
 // quickly interim text appears.
 //
 // `vadDetectionMargin` is how much silence must follow speech before the
-// VAD commits a segment (library default 500ms). It trades commit latency,
-// not CPU, so leave it fixed while profiling `timeout`.
+// VAD commits a segment (library default 500ms). Retained for profiling
+// if VAD is re-enabled after its native endpoint handling is corrected.
 export const STREAMING_CONFIG = {
+  // The pinned OnlineASR VAD endpoint path commits its cached hypothesis
+  // before decoding the newest speech tail. Bypass it to retain short
+  // utterances and words that arrive during an inference.
+  USE_VAD: false,
   INFERENCE_TIMEOUT_MS: 100,
   VAD_DETECTION_MARGIN_MS: 300,
 } as const;
