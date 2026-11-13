@@ -20,3 +20,23 @@ describe('FALLBACK_PLANS', () => {
     expect(FALLBACK_PLANS.map((p) => p.price)).toEqual(['$19.99', '$3.99', '$49.99']);
   });
 });
+
+describe('trialLabel', () => {
+  const { trialLabel } = require('../../services/billing/plans');
+  test('free intro offers become a readable trial label', () => {
+    expect(trialLabel({ price: 0, periodNumberOfUnits: 3, periodUnit: 'DAY' })).toBe('3-day free trial');
+    expect(trialLabel({ price: 0, periodNumberOfUnits: 7, periodUnit: 'DAY' })).toBe('7-day free trial');
+    expect(trialLabel({ price: 0, periodNumberOfUnits: 1, periodUnit: 'WEEK' })).toBe('1-week free trial');
+  });
+  test('paid or missing intro offers are not trials', () => {
+    expect(trialLabel({ price: 0.99, periodNumberOfUnits: 1, periodUnit: 'MONTH' })).toBeUndefined();
+    expect(trialLabel(null)).toBeUndefined();
+  });
+});
+
+describe('fallback trials', () => {
+  test('monthly has a 3-day trial and yearly a 7-day trial', () => {
+    const byId = Object.fromEntries(FALLBACK_PLANS.map((p) => [p.id, p.trial]));
+    expect(byId).toEqual({ yearly: '7-day free trial', monthly: '3-day free trial', lifetime: undefined });
+  });
+});

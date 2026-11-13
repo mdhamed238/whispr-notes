@@ -122,7 +122,7 @@ with Base as soon as Base is ready.
   export and plain share.
 - **Pro:** Large-v3 / Small final pass ("Enhanced transcription"), unlimited summaries & AI
   titles, PDF / Markdown / SRT export, audio sharing, import, Insights, languages.
-- **Prices:** $3.99/month, $19.99/year (with 7-day free trial), $49.99 lifetime (non-consumable). (Revised 2026-11-13 from $7.99 / $49.99 / $99.)
+- **Prices:** $3.99/month (3-day free trial), $19.99/year (7-day free trial), $49.99 lifetime (non-consumable). (Revised 2026-11-13 from $7.99 / $49.99 / $99.)
   Exact prices set in store consoles; app reads them from RevenueCat offerings.
 - Paywall: one well-designed screen, shown from gated actions and from Settings. Restore
   purchases button. No dark patterns.
