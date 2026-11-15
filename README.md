@@ -6,7 +6,8 @@ Private voice notes and meeting summaries, transcribed **on your phone**, in 37 
 
 ## Releases
 
-- **Android 1.0.0 (build 2, arm64-v8a):** [Download APK](https://expo.dev/artifacts/eas/EAy1kwiNGnk2dPYKChr4ciiu896PCVgIV9_DTusyj_4.apk) · [EAS build details](https://expo.dev/accounts/mdhamed238/projects/whisprnotes/builds/204f2e5f-74f4-4811-a22d-84a750dcb792). Built successfully from revision `0e13bec` with the lifetime pricing and recording fixes. EAS lists this build's expiration date as December 13, 2026.
+- **Android 1.0.0 (build 4, arm64-v8a):** [Download APK](https://expo.dev/artifacts/eas/EsB8wtePb7RCILVJ8EwApwiZptx73MP0JjpwRzWFJUE.apk) · [EAS build details](https://expo.dev/accounts/mdhamed238/projects/whisprnotes/builds/7af5b21d-4ca7-47b0-afc2-d1eecf69e0dd). Built from revision `0270f9c`: 20 interface languages, a live preview in every language, pause and resume, and a message with a retry when the speech model cannot be downloaded. EAS lists this build's expiration date as December 15, 2026.
+- **Previous, Android 1.0.0 (build 2, arm64-v8a):** [Download APK](https://expo.dev/artifacts/eas/EAy1kwiNGnk2dPYKChr4ciiu896PCVgIV9_DTusyj_4.apk) · [EAS build details](https://expo.dev/accounts/mdhamed238/projects/whisprnotes/builds/204f2e5f-74f4-4811-a22d-84a750dcb792). Built successfully from revision `0e13bec` with the lifetime pricing and recording fixes. EAS lists this build's expiration date as December 13, 2026.
 
 ## Features
 
