@@ -1,3 +1,5 @@
 {
-  "NSMicrophoneUsageDescription": "WhisprNotesはノートを録音するためにマイクを使用します。音声はこのデバイス上で処理され、アップロードされることはありません。"
+  "ios": {
+    "NSMicrophoneUsageDescription": "WhisprNotesはノートを録音するためにマイクを使用します。音声はこのデバイス上で処理され、アップロードされることはありません。"
+  }
 }

@@ -1,3 +1,5 @@
 {
-  "NSMicrophoneUsageDescription": "WhisprNotes usa il microfono per registrare le tue note. L'audio viene elaborato su questo dispositivo e non viene mai caricato online."
+  "ios": {
+    "NSMicrophoneUsageDescription": "WhisprNotes usa il microfono per registrare le tue note. L'audio viene elaborato su questo dispositivo e non viene mai caricato online."
+  }
 }

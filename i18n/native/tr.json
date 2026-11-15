@@ -1,3 +1,5 @@
 {
-  "NSMicrophoneUsageDescription": "WhisprNotes, notlarınızı kaydetmek için mikrofonu kullanır. Ses bu cihazda işlenir ve asla başka bir yere yüklenmez."
+  "ios": {
+    "NSMicrophoneUsageDescription": "WhisprNotes, notlarınızı kaydetmek için mikrofonu kullanır. Ses bu cihazda işlenir ve asla başka bir yere yüklenmez."
+  }
 }

@@ -1,3 +1,5 @@
 {
-  "NSMicrophoneUsageDescription": "WhisprNotes używa mikrofonu do nagrywania notatek. Dźwięk jest przetwarzany na tym urządzeniu i nigdy nie jest nigdzie przesyłany."
+  "ios": {
+    "NSMicrophoneUsageDescription": "WhisprNotes używa mikrofonu do nagrywania notatek. Dźwięk jest przetwarzany na tym urządzeniu i nigdy nie jest nigdzie przesyłany."
+  }
 }

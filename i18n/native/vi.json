@@ -1,3 +1,5 @@
 {
-  "NSMicrophoneUsageDescription": "WhisprNotes dùng micrô để ghi âm ghi chú của bạn. Âm thanh được xử lý trên thiết bị này và không bao giờ được tải lên."
+  "ios": {
+    "NSMicrophoneUsageDescription": "WhisprNotes dùng micrô để ghi âm ghi chú của bạn. Âm thanh được xử lý trên thiết bị này và không bao giờ được tải lên."
+  }
 }

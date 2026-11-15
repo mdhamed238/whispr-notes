@@ -1,3 +1,5 @@
 {
-  "NSMicrophoneUsageDescription": "يستخدم WhisprNotes الميكروفون لتسجيل ملاحظاتك. تُعالَج الصوتيات على هذا الجهاز ولا تُرفع أبدًا."
+  "ios": {
+    "NSMicrophoneUsageDescription": "يستخدم WhisprNotes الميكروفون لتسجيل ملاحظاتك. تُعالَج الصوتيات على هذا الجهاز ولا تُرفع أبدًا."
+  }
 }
