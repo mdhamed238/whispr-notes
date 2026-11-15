@@ -8,7 +8,6 @@
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import ScreenHeader from '@/components/ui/ScreenHeader';
-import Skeleton from '@/components/ui/Skeleton';
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { AUDIO_CONFIG, CAPTURE_BUFFER_SECONDS, STREAMING_CONFIG, UI_CONFIG } from '@/constants/config';
@@ -20,6 +19,7 @@ import { formatDateTime, useI18n } from '@/i18n';
 import * as notesRepo from '@/services/db/notesRepo';
 import * as enhanceQueue from '@/services/ai/enhanceQueue';
 import { effectiveLanguage, livePreviewEngine } from '@/services/ai/language';
+import { MODEL_CATALOG, formatBytes } from '@/services/ai/modelCatalog';
 import { fallbackTitle } from '@/services/ai/prompts';
 import { RecordingControls, type RecordingPhase } from '@/services/recordingControls';
 import { LivePreview } from '@/services/livePreview';
@@ -171,6 +171,7 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
   });
   // Other languages can always record; their preview joins in when it can.
   const ready = streaming ? model.isReady : true;
+  const streamingModelSize = formatBytes(MODEL_CATALOG['whisper-base-en'].approxBytes);
 
   // Bug fix: useSpeechToText rebuilds `streamInsert` (via useCallback keyed
   // on `isReady`) every time readiness changes, and the rebuilt version
@@ -871,9 +872,11 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
           subtitle={
             ready
               ? t('record.ready')
-              : model.downloadProgress > 0
-                ? t('record.downloadingModel', { percent: Math.round(model.downloadProgress * 100) })
-                : t('record.loadingModel')
+              : model.error
+                ? t('record.modelFailed')
+                : model.downloadProgress > 0
+                  ? t('record.downloadingModel', { percent: Math.round(model.downloadProgress * 100) })
+                  : t('record.loadingModel')
           }
           right={
             <AnimatedPressable
@@ -895,15 +898,30 @@ function RecordingSession({ onSessionReset }: { onSessionReset: () => void }) {
 
         {!ready ? (
           <Animated.View entering={FadeIn.duration(300)} style={styles.loadingContainer}>
-            <Card style={styles.loadingCard} elevation="sm">
-              <Text style={styles.loadingText}>{t('record.loadingCard')}</Text>
-              <Text style={styles.progressText}>{Math.round(model.downloadProgress * 100)}%</Text>
-              <View style={styles.progressTrack}>
-                <Animated.View style={[styles.progressFill, progressBarStyle]} />
-              </View>
-              <Skeleton width="88%" height={12} style={{ marginTop: Spacing.xl }} />
-              <Skeleton width="62%" height={12} style={{ marginTop: Spacing.sm }} />
-            </Card>
+            {model.error ? (
+              // The download (or the load) failed. The library only reports it;
+              // left unshown, this was a progress bar at 0% for ever.
+              <Card style={styles.loadingCard} elevation="sm">
+                <Ionicons name="cloud-offline-outline" size={36} color={colors.textMuted} style={styles.loadingIcon} />
+                <Text style={styles.loadingText}>{t('record.modelFailed')}</Text>
+                <Text style={styles.loadingNote}>{t('record.modelFailedBody', { size: streamingModelSize })}</Text>
+                {/* The library's own words, untranslated: what a bug report needs. */}
+                <Text style={styles.loadingReason} numberOfLines={4} selectable>
+                  {model.error.message}
+                </Text>
+                {/* A fresh session mounts the model hook again, which starts the load over. */}
+                <Button label={t('common.retry')} icon="refresh" onPress={onSessionReset} style={styles.retryButton} />
+              </Card>
+            ) : (
+              <Card style={styles.loadingCard} elevation="sm">
+                <Text style={styles.loadingText}>{t('record.loadingCard')}</Text>
+                <Text style={styles.progressText}>{Math.round(model.downloadProgress * 100)}%</Text>
+                <View style={styles.progressTrack}>
+                  <Animated.View style={[styles.progressFill, progressBarStyle]} />
+                </View>
+                <Text style={styles.loadingNote}>{t('record.modelDownloadNote', { size: streamingModelSize })}</Text>
+              </Card>
+            )}
           </Animated.View>
         ) : (
           <Animated.View entering={FadeInDown.duration(400)} style={{ flex: 1 }}>
@@ -1281,6 +1299,10 @@ function createStyles(colors: typeof Colors.light) {
     loadingCard: { alignItems: 'center', paddingVertical: Spacing.xxl },
     loadingText: { fontSize: FontSize.lg, fontWeight: '700', color: colors.text, marginBottom: Spacing.sm },
     progressText: { fontSize: FontSize.xxl, fontWeight: '800', color: colors.tint, marginBottom: Spacing.lg },
+    loadingIcon: { marginBottom: Spacing.md },
+    loadingNote: { fontSize: FontSize.sm, color: colors.textMuted, textAlign: 'center', marginTop: Spacing.lg },
+    loadingReason: { fontSize: FontSize.xs, color: colors.textMuted, textAlign: 'center', marginTop: Spacing.md, opacity: 0.8 },
+    retryButton: { marginTop: Spacing.xl, alignSelf: 'stretch' },
     progressTrack: {
       width: '100%',
       height: 8,

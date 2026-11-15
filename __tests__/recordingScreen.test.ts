@@ -25,6 +25,13 @@ const mockAcquire = jest.fn(async (_language: string) => mockTranscribeWindow);
 const mockRelease = jest.fn();
 let mockSlowTakes = 0;
 let mockModelInstalled: (installed: boolean) => void = () => {};
+/** What the streaming (English) model's hook reports. */
+let mockModelState: { isReady: boolean; downloadProgress: number; error: { message: string } | null } = {
+  isReady: true,
+  downloadProgress: 1,
+  error: null,
+};
+let mockModelLoads = 0;
 const mockPush = jest.fn();
 const mockSavedNotes: Note[] = [];
 
@@ -102,13 +109,11 @@ jest.mock('react-native-audio-api', () => ({
 }));
 jest.mock('react-native-executorch/legacy', () => ({
   models: { speech_to_text: { whisper_base_en: () => ({}) } },
-  useSpeechToText: () => ({
-    isReady: true,
-    downloadProgress: 1,
-    streamInsert() {},
-    streamStop() {},
-    stream: mockStream,
-  }),
+  useSpeechToText: () => {
+    // The real hook starts loading (and, the first time, downloading) when it mounts.
+    require('react').useEffect(() => { mockModelLoads++; }, []);
+    return { ...mockModelState, streamInsert() {}, streamStop() {}, stream: mockStream };
+  },
 }));
 
 const RecordScreen = require('../app/(tabs)/index').default;
@@ -163,6 +168,8 @@ beforeEach(async () => {
   mockTranscribeWindow.mockReset().mockResolvedValue('');
   mockAbortWindow.mockClear();
   mockSlowTakes = 0;
+  mockModelState = { isReady: true, downloadProgress: 1, error: null };
+  mockModelLoads = 0;
   mockStart.mockReset().mockResolvedValue({ status: 'success' });
   mockNativeStop.mockReset().mockImplementationOnce(() => mockStop.promise).mockResolvedValue({ status: 'success' });
   await act(async () => { screen = create(React.createElement(RecordScreen)); });
@@ -366,6 +373,41 @@ test('the recording limit counts recorded time and stops the take when it is rea
   // More buffers arriving while it stops don't stop it twice.
   await act(async () => { mockAudioReady(audio(1)); });
   expect(mockNativeStop).toHaveBeenCalledTimes(1);
+});
+
+describe('downloading the live transcription model (English)', () => {
+  const { MODEL_CATALOG, formatBytes } = require('../services/ai/modelCatalog');
+  const size = formatBytes(MODEL_CATALOG['whisper-base-en'].approxBytes);
+  const rerender = () => act(async () => { screen.update(React.createElement(RecordScreen)); });
+  /** Text as it reads on screen, whether it was written as one string or in pieces. */
+  const reads = (text: string) =>
+    screen.root.findAllByType(Text).some((node: any) => [node.props.children].flat().join('') === text);
+
+  test('while it downloads, the card shows how far along it is and how big the download is', async () => {
+    mockModelState = { isReady: false, downloadProgress: 0.37, error: null };
+    await rerender();
+    expect(reads('37%')).toBe(true);
+    expect(reads(`One-time download, about ${size}.`)).toBe(true);
+    expect(recordButton()).toBeUndefined();
+  });
+
+  test('a download that fails says so, with the reason, instead of a bar stuck at zero; and it can be retried', async () => {
+    const reason = "Failed to fetch resource from 'https://huggingface.co/model.pte', status: 0";
+    mockModelState = { isReady: false, downloadProgress: 0, error: { message: reason } };
+    await rerender();
+    expect(reads("Couldn't download the live transcription model")).toBe(true);
+    expect(reads(`Check your internet connection, then try again. The download is about ${size}.`)).toBe(true);
+    expect(reads(reason)).toBe(true);
+    expect(reads('0%')).toBe(false);
+    expect(recordButton()).toBeUndefined();
+
+    // The connection is back: Try again starts the load afresh.
+    const loads = mockModelLoads;
+    mockModelState = { isReady: true, downloadProgress: 1, error: null };
+    await act(async () => { button('Try again').props.onPress(); });
+    expect(mockModelLoads).toBe(loads + 1);
+    expect(recordButton().props.accessibilityLabel).toBe('Start recording');
+  });
 });
 
 describe('live preview in other languages', () => {
