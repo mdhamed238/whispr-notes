@@ -1,8 +1,18 @@
 /**
  * Every on-device model WhisprNotes can use, with what the user needs to
  * know about it. Pure data.
+ *
+ * Sizes are the Content-Length of the files as served (checked 2026-11-15).
+ * ExecuTorch ships a different Whisper file per platform: Core ML at half
+ * precision on iOS, XNNPACK at full precision on Android, which is two to
+ * three times larger. Showing the iOS figure on Android told people to
+ * expect 150 MB for what is a 399 MB download.
  */
+import { Platform } from 'react-native';
+
 import type { EngineId, LlmId } from './tiers';
+
+const ios = Platform.OS === 'ios';
 
 export type ModelId = EngineId | LlmId;
 
@@ -30,7 +40,7 @@ export const MODEL_CATALOG: Record<ModelId, ModelInfo> = {
   'whisper-small': {
     id: 'whisper-small',
     name: 'Whisper Small',
-    approxBytes: 490_000_000,
+    approxBytes: ios ? 484_940_213 : 1_128_717_824,
     delivery: 'library',
     pro: true,
   },
@@ -47,21 +57,21 @@ export const MODEL_CATALOG: Record<ModelId, ModelInfo> = {
   'whisper-base-en': {
     id: 'whisper-base-en',
     name: 'Whisper Base (English)',
-    approxBytes: 150_000_000,
+    approxBytes: ios ? 146_287_992 : 398_646_144,
     delivery: 'library',
     pro: false,
   },
   'qwen3-1.7b': {
     id: 'qwen3-1.7b',
     name: 'Qwen3 1.7B',
-    approxBytes: 1_200_000_000,
+    approxBytes: 1_303_738_496,
     delivery: 'library',
     pro: false,
   },
   'qwen3-0.6b': {
     id: 'qwen3-0.6b',
     name: 'Qwen3 0.6B',
-    approxBytes: 500_000_000,
+    approxBytes: 505_686_400,
     delivery: 'library',
     pro: false,
   },
