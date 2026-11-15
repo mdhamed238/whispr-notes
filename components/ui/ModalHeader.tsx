@@ -4,11 +4,12 @@
  */
 import { useRouter } from 'expo-router';
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { I18nManager, StyleSheet, Text, View } from 'react-native';
 
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { FontSize, Spacing } from '@/constants/Spacing';
+import { useI18n } from '@/i18n';
 
 import IconButton from './IconButton';
 
@@ -25,12 +26,14 @@ export default function ModalHeader({
 }) {
   const colors = Colors[useColorScheme() ?? 'light'];
   const router = useRouter();
+  const { t } = useI18n();
   return (
     <View style={styles.row}>
       <IconButton
-        name={variant === 'back' ? 'chevron-back' : 'close'}
+        name={variant === 'close' ? 'close' : I18nManager.isRTL ? 'chevron-forward' : 'chevron-back'}
         background={colors.surface}
         onPress={onClose ?? (() => router.back())}
+        accessibilityLabel={variant === 'close' ? t('common.close') : t('common.back')}
       />
       {title ? (
         <Text style={[styles.title, { color: colors.text }]} numberOfLines={1} accessibilityRole="header">

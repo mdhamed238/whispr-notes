@@ -94,3 +94,50 @@ describe('front matter safety', () => {
     expect(toMarkdown({ ...note, language: 'en\nx: 1' }, { scope: 'full', segments: null, timestamps: false })).toContain('language: "en x: 1"');
   });
 });
+
+describe('exports in other languages', () => {
+  const { DEFAULT_EXPORT_LABELS, toText } = require('../../services/export/generators');
+  const labels = {
+    ...DEFAULT_EXPORT_LABELS,
+    summary: 'Résumé',
+    keyPoints: 'Points clés',
+    actionItems: 'Actions',
+    decisions: 'Décisions',
+    transcript: 'Transcription',
+    tags: 'Étiquettes',
+  };
+
+  test('section names are translated in Markdown and text', () => {
+    const md = toMarkdown(note, { scope: 'full', segments: null, timestamps: false, labels });
+    expect(md).toContain('## Résumé');
+    expect(md).toContain('## Actions\n\n- [ ] Ana: notes');
+    expect(md).toContain('## Transcription');
+    const text = toText(note, { scope: 'full', labels });
+    expect(text).toContain('RÉSUMÉ');
+    expect(text).toContain('POINTS CLÉS');
+  });
+
+  test('file names keep letters of other scripts', () => {
+    expect(slugify('会议记录 2026')).toBe('会议记录-2026');
+    expect(slugify('Заметки о встрече!')).toBe('заметки-о-встрече');
+    expect(slugify('ملاحظات الاجتماع')).toBe('ملاحظات-الاجتماع');
+    expect(slugify('회의 메모')).toBe('회의-메모');
+    expect(slugify('a/b\\c:d*e?"f<g>h|i')).toBe('a-b-c-d-e-f-g-h-i');
+    expect(Array.from(slugify('字'.repeat(200)))).toHaveLength(60);
+  });
+
+  test('an Arabic note is laid out right to left, a Latin one left to right', () => {
+    const arabic = buildPdfHtml(
+      { ...note, title: 'مراجعة الخطة', transcription: 'ناقشنا خطة الربع القادم.', language: 'ar', summary: null },
+      { scope: 'full', segments: null, timestamps: false }
+    );
+    expect(arabic).toContain('dir="rtl"');
+    expect(arabic).toContain('lang="ar"');
+    expect(buildPdfHtml(note, { scope: 'full', segments: null, timestamps: false })).toContain('dir="ltr"');
+  });
+
+  test('translated labels are escaped into the PDF', () => {
+    const out = buildPdfHtml(note, { scope: 'full', segments: null, timestamps: false, labels: { ...labels, summary: 'R&D <résumé>' } });
+    expect(out).toContain('R&amp;D &lt;résumé&gt;');
+  });
+});

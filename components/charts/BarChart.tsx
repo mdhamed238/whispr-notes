@@ -1,6 +1,6 @@
 /**
- * 14-day minutes bar chart. Tap a bar for its exact value. Bars are drawn to
- * one scale with a labelled max gridline.
+ * Bar chart (minutes per day, recordings per weekday). Tap a bar for its
+ * exact value. Bars are drawn to one scale with a labelled max gridline.
  */
 import React, { useState } from 'react';
 import { LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
@@ -40,6 +40,7 @@ export default function BarChart({
   mutedColor: string;
   textColor: string;
   gridColor: string;
+  /** Shown after values; may be empty for plain counts. */
   unit: string;
 }) {
   const [width, setWidth] = useState(0);
@@ -53,13 +54,13 @@ export default function BarChart({
   return (
     <View onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}>
       <Text style={[styles.readout, { color: textColor }]} accessibilityLiveRegion="polite">
-        {bars[active] ? `${bars[active].detail}: ${bars[active].value} ${unit}` : ' '}
+        {bars[active] ? `${bars[active].detail}: ${bars[active].value} ${unit}`.trim() : ' '}
       </Text>
       {width > 0 && (
-        <Svg width={width} height={HEIGHT} accessibilityLabel={`Bar chart of ${unit} per day`}>
+        <Svg width={width} height={HEIGHT} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
           <Line x1={0} x2={width} y1={TOP} y2={TOP} stroke={gridColor} strokeDasharray="3 4" />
           <SvgText x={width} y={TOP - 4} fontSize={10} fill={mutedColor} textAnchor="end">
-            {`${max} ${unit}`}
+            {`${max} ${unit}`.trim()}
           </SvgText>
           <Line x1={0} x2={width} y1={TOP + plotH} y2={TOP + plotH} stroke={gridColor} />
           {bars.map((b, i) => {
@@ -76,7 +77,7 @@ export default function BarChart({
                 {/* Full-height hit area so short bars are easy to tap. */}
                 <Rect x={i * slot} y={TOP} width={slot} height={plotH} fill="transparent" />
                 <Rect x={x} y={TOP + plotH - h} width={barW} height={h} rx={Math.min(4, barW / 2)} fill={i === active ? color : `${color}80`} />
-                {(i % 2 === bars.length % 2 || i === bars.length - 1) && (
+                {(bars.length <= 7 || i % 2 === bars.length % 2 || i === bars.length - 1) && (
                   <SvgText x={i * slot + slot / 2} y={HEIGHT - 4} fontSize={10} fill={mutedColor} textAnchor="middle">
                     {b.label}
                   </SvgText>

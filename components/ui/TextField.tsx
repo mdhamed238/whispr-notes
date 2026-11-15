@@ -7,6 +7,7 @@ import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { FontSize, Spacing } from '@/constants/Spacing';
 import { Radius } from '@/constants/theme';
+import { useI18n } from '@/i18n';
 
 interface Props extends TextInputProps {
   icon?: React.ComponentProps<typeof Ionicons>['name'];
@@ -27,6 +28,7 @@ export default function TextField({
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const focus = useSharedValue(0);
+  const { t } = useI18n();
 
   const animatedStyle = useAnimatedStyle(() => ({
     borderColor: interpolateColor(focus.value, [0, 1], [colors.border, colors.tint]),
@@ -64,7 +66,15 @@ export default function TextField({
         {...rest}
       />
       {onClear && !!value && (
-        <Ionicons name="close-circle" size={18} color={colors.textMuted} onPress={onClear} hitSlop={8} />
+        <Ionicons
+          name="close-circle"
+          size={18}
+          color={colors.textMuted}
+          onPress={onClear}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={t('common.clear')}
+        />
       )}
     </Animated.View>
   );

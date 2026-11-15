@@ -46,6 +46,8 @@ export interface NoteSummary {
   decisions: string[];
   /** Which LLM produced it, e.g. `qwen3-1.7b`. */
   model: string;
+  /** What the summary focused on (see services/ai/summaryStyles); absent on older notes. */
+  style?: string;
   /** ISO timestamp. */
   generatedAt: string;
 }
@@ -72,6 +74,28 @@ export interface Note {
   titleIsAuto: boolean;
   /** Set for imported notes, used to skip duplicates on re-import. */
   contentHash: string | null;
+}
+
+/**
+ * A note as the list shows it: a snippet instead of the full transcript and
+ * summary, so opening the list costs the same whether notes are a paragraph
+ * or a two-hour meeting.
+ */
+export interface NoteListItem {
+  id: string;
+  title: string;
+  /** Start of the summary overview when there is one, else of the transcript. */
+  snippet: string;
+  hasSummary: boolean;
+  hasAudio: boolean;
+  duration: number;
+  tags: string[];
+  pinned: boolean;
+  createdAt: Date;
+  language: string | null;
+  source: 'recording' | 'import';
+  enhancement: EnhancementState;
+  wordCount: number;
 }
 
 export type NoteSort = 'newest' | 'oldest' | 'longest' | 'title';

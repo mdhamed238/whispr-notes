@@ -6,7 +6,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
 import type { PurchasesOffering } from 'react-native-purchases';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -16,21 +15,25 @@ import ModalHeader from '@/components/ui/ModalHeader';
 import { useToast } from '@/components/ui/Toast';
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
+import { LANGUAGES } from '@/constants/languages';
 import { FontSize, Spacing } from '@/constants/Spacing';
 import { Radius } from '@/constants/theme';
 import { usePro } from '@/hooks/usePro';
+import { useI18n, type TKey } from '@/i18n';
 import { lifetimePlanFromOffering } from '@/services/billing/plans';
-import { getCurrentOffering, isStoreConfigured, purchase, restore } from '@/services/billing/purchases';
+import { FREE_SUMMARIES_PER_WEEK } from '@/services/billing/quota';
+import { getCurrentOffering, isStoreConfigured, peekCurrentOffering, purchase, restore } from '@/services/billing/purchases';
 import { haptic } from '@/services/haptics';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
-const BENEFITS: { icon: IconName; title: string; body: string }[] = [
-  { icon: 'sparkles', title: 'Whisper Large-v3 accuracy', body: 'Studio-grade transcripts in 99 languages, on your phone.' },
-  { icon: 'reader', title: 'Unlimited AI summaries', body: 'Key points, action items and decisions for every meeting.' },
-  { icon: 'share', title: 'Every export', body: 'Branded PDF, Markdown, subtitles and the original audio.' },
-  { icon: 'download', title: 'Import & back up', body: 'Bring notes from Notion, Obsidian, Evernote and more.' },
-  { icon: 'stats-chart', title: 'Insights', body: 'Your streaks, speaking pace and time saved.' },
+const BENEFITS: { icon: IconName; title: TKey; body: TKey }[] = [
+  { icon: 'sparkles', title: 'paywall.benefit.accuracy.title', body: 'paywall.benefit.accuracy.body' },
+  { icon: 'reader', title: 'paywall.benefit.summaries.title', body: 'paywall.benefit.summaries.body' },
+  { icon: 'chatbubble-ellipses', title: 'paywall.benefit.ask.title', body: 'paywall.benefit.ask.body' },
+  { icon: 'musical-notes', title: 'paywall.benefit.audio.title', body: 'paywall.benefit.audio.body' },
+  { icon: 'share', title: 'paywall.benefit.export.title', body: 'paywall.benefit.export.body' },
+  { icon: 'stats-chart', title: 'paywall.benefit.insights.title', body: 'paywall.benefit.insights.body' },
 ];
 
 export default function PaywallScreen() {
@@ -38,22 +41,26 @@ export default function PaywallScreen() {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
   const toast = useToast();
+  const { t } = useI18n();
   const { isPro } = usePro();
-  const [offering, setOffering] = useState<PurchasesOffering | null>(null);
-  const [loading, setLoading] = useState(true);
+  // The offering is fetched at launch, so the price is usually here already.
+  const [offering, setOffering] = useState<PurchasesOffering | null>(() => peekCurrentOffering());
+  const [loading, setLoading] = useState(() => peekCurrentOffering() === null);
   const [busy, setBusy] = useState<'buy' | 'restore' | null>(null);
 
   useEffect(() => {
+    if (offering) return;
     getCurrentOffering()
       .then(setOffering)
       .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const plan = lifetimePlanFromOffering(offering);
 
   const handleBuy = async () => {
     if (!plan.pkg) {
-      toast.show({ message: 'Lifetime Pro is unavailable right now. Check your connection and try again.', tone: 'error' });
+      toast.show({ message: t('paywall.unavailable'), tone: 'error' });
       return;
     }
     setBusy('buy');
@@ -61,12 +68,12 @@ export default function PaywallScreen() {
       const ok = await purchase(plan.pkg);
       if (ok) {
         void haptic('success');
-        toast.show({ message: 'Welcome to WhisprNotes Pro.', tone: 'success' });
+        toast.show({ message: t('paywall.welcome'), tone: 'success' });
         router.back();
       }
     } catch (error) {
       console.warn('Purchase failed:', error);
-      toast.show({ message: 'The purchase didn\'t go through. You were not charged.', tone: 'error' });
+      toast.show({ message: t('paywall.failed'), tone: 'error' });
     } finally {
       setBusy(null);
     }
@@ -77,10 +84,11 @@ export default function PaywallScreen() {
     try {
       const ok = await restore();
       void haptic(ok ? 'success' : 'warning');
-      toast.show({ message: ok ? 'Pro restored.' : 'No previous purchase found for this store account.', tone: ok ? 'success' : 'default' });
+      toast.show({ message: ok ? t('paywall.restored') : t('paywall.nothingToRestore'), tone: ok ? 'success' : 'default' });
       if (ok) router.back();
     } catch (error) {
-      toast.show({ message: error instanceof Error ? error.message : 'Restore failed.', tone: 'error' });
+      console.warn('Restore failed:', error);
+      toast.show({ message: t('paywall.restoreFailed'), tone: 'error' });
     } finally {
       setBusy(null);
     }
@@ -92,9 +100,9 @@ export default function PaywallScreen() {
         <ModalHeader variant="close" />
         <View style={styles.center}>
           <LogoMark size={72} />
-          <Text style={styles.headline}>You're on Pro</Text>
-          <Text style={styles.sub}>Thank you for supporting private, on-device notes.</Text>
-          <Text style={styles.fine}>Your Pro access is active on this store account.</Text>
+          <Text style={styles.headline}>{t('paywall.activeTitle')}</Text>
+          <Text style={styles.sub}>{t('paywall.activeBody')}</Text>
+          <Text style={styles.fine}>{t('paywall.activeFine')}</Text>
         </View>
       </SafeAreaView>
     );
@@ -104,23 +112,23 @@ export default function PaywallScreen() {
     <SafeAreaView style={styles.container}>
       <ModalHeader variant="close" />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Animated.View entering={FadeInDown.duration(350)} style={styles.hero}>
+        <View style={styles.hero}>
           <LogoMark size={64} />
-          <Text style={styles.eyebrow}>WhisprNotes Pro</Text>
-          <Text style={styles.headline}>Your meetings, perfectly captured. Privately.</Text>
-        </Animated.View>
+          <Text style={styles.eyebrow}>{t('paywall.eyebrow')}</Text>
+          <Text style={styles.headline}>{t('paywall.headline')}</Text>
+        </View>
 
         <View style={styles.benefits}>
-          {BENEFITS.map((b, i) => (
-            <Animated.View key={b.title} entering={FadeInDown.delay(60 + i * 40).duration(300)} style={styles.benefit}>
+          {BENEFITS.map((b) => (
+            <View key={b.title} style={styles.benefit}>
               <View style={styles.benefitIcon}>
                 <Ionicons name={b.icon} size={18} color={colors.tint} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.benefitTitle}>{b.title}</Text>
-                <Text style={styles.benefitBody}>{b.body}</Text>
+                <Text style={styles.benefitTitle}>{t(b.title)}</Text>
+                <Text style={styles.benefitBody}>{t(b.body)}</Text>
               </View>
-            </Animated.View>
+            </View>
           ))}
         </View>
 
@@ -129,46 +137,51 @@ export default function PaywallScreen() {
         ) : (
           <View style={styles.plan}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.planTitle}>{plan.title}</Text>
-              <Text style={styles.planPeriod}>Every Pro feature, forever</Text>
+              <Text style={styles.planTitle}>{t('paywall.planTitle')}</Text>
+              <Text style={styles.planPeriod}>{t('paywall.planBody')}</Text>
             </View>
             <View style={{ alignItems: 'flex-end' }}>
               <Text style={styles.planPrice}>{plan.price}</Text>
-              <Text style={styles.planPeriod}>{plan.period}</Text>
+              <Text style={styles.planPeriod}>{t('paywall.oneTime')}</Text>
             </View>
           </View>
         )}
 
         <Button
-          label={!loading && !plan.pkg ? 'Purchase unavailable' : 'Buy once'}
+          label={!loading && !plan.pkg ? t('paywall.buyUnavailable') : t('paywall.buy')}
           loading={busy === 'buy'}
           disabled={busy !== null || loading || !plan.pkg}
           onPress={handleBuy}
           haptic="medium"
         />
 
-        <Text style={styles.fine}>One payment, Pro forever on this store account. No subscription.</Text>
-        {!loading && !plan.pkg && (
-          <Text style={styles.fine}>Lifetime Pro is unavailable right now. The US base price is $4.99; your local store price will appear when available. Check your connection and reopen this screen to try again.</Text>
-        )}
+        <Text style={styles.fine}>{t('paywall.terms')}</Text>
+        {!loading && !plan.pkg && <Text style={styles.fine}>{t('paywall.unavailableDetail')}</Text>}
         {!isStoreConfigured() && __DEV__ && (
           <Text style={[styles.fine, { color: colors.warning }]}>Developer: the store isn't configured. Use Settings → Developer: unlock Pro.</Text>
         )}
 
         <View style={styles.links}>
-          <Pressable onPress={handleRestore} disabled={busy !== null} hitSlop={8}>
-            <Text style={styles.link}>{busy === 'restore' ? 'Restoring…' : 'Restore purchase'}</Text>
+          <Pressable onPress={handleRestore} disabled={busy !== null} hitSlop={8} accessibilityRole="button">
+            <Text style={styles.link}>{busy === 'restore' ? t('paywall.restoring') : t('paywall.restore')}</Text>
           </Pressable>
           <Text style={styles.dot}>·</Text>
-          <Pressable onPress={() => router.push('/legal/terms')} hitSlop={8}>
-            <Text style={styles.link}>Terms</Text>
+          <Pressable onPress={() => router.push('/legal/terms')} hitSlop={8} accessibilityRole="link">
+            <Text style={styles.link}>{t('paywall.termsLink')}</Text>
           </Pressable>
           <Text style={styles.dot}>·</Text>
-          <Pressable onPress={() => router.push('/legal/privacy')} hitSlop={8}>
-            <Text style={styles.link}>Privacy</Text>
+          <Pressable onPress={() => router.push('/legal/privacy')} hitSlop={8} accessibilityRole="link">
+            <Text style={styles.link}>{t('paywall.privacyLink')}</Text>
           </Pressable>
         </View>
-        <Text style={styles.fine}>Your recordings and notes stay on this phone, with or without Pro.</Text>
+
+        <View style={styles.freeBox}>
+          <Text style={styles.freeTitle}>{t('paywall.freeTitle')}</Text>
+          <Text style={styles.freeBody}>
+            {t('paywall.freeBody', { languages: LANGUAGES.length, summaries: FREE_SUMMARIES_PER_WEEK })}
+          </Text>
+        </View>
+        <Text style={styles.fine}>{t('paywall.privacyNote')}</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -202,8 +215,11 @@ function createStyles(colors: typeof Colors.light) {
     planPrice: { fontSize: FontSize.md, fontWeight: '800', color: colors.text },
     planPeriod: { fontSize: FontSize.xs, color: colors.textMuted },
     fine: { fontSize: FontSize.xs, color: colors.textMuted, textAlign: 'center', lineHeight: 17 },
-    links: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: Spacing.sm },
+    links: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: Spacing.sm },
     link: { fontSize: FontSize.sm, color: colors.tint, fontWeight: '600' },
     dot: { color: colors.textMuted },
+    freeBox: { backgroundColor: colors.surface, borderRadius: Radius.lg, padding: Spacing.lg, gap: Spacing.xs },
+    freeTitle: { fontSize: FontSize.sm, fontWeight: '800', color: colors.text },
+    freeBody: { fontSize: FontSize.sm, color: colors.textMuted, lineHeight: 19 },
   });
 }

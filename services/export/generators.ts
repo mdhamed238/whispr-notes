@@ -7,16 +7,51 @@ import type { Note, NoteSummary, TranscriptSegment } from '../../types';
 
 export type ExportScope = 'summary' | 'full';
 
-/** File-name-safe slug: `Q3: Plan / Review!` → `q3-plan-review`. */
+/** Section names written into exports. English unless the caller translates them. */
+export interface ExportLabels {
+  summary: string;
+  keyPoints: string;
+  actionItems: string;
+  decisions: string;
+  transcript: string;
+  tags: string;
+  /** PDF footer. */
+  madeWith: string;
+  aiDisclaimer: string;
+}
+
+export const DEFAULT_EXPORT_LABELS: ExportLabels = {
+  summary: 'Summary',
+  keyPoints: 'Key points',
+  actionItems: 'Action items',
+  decisions: 'Decisions',
+  transcript: 'Transcript',
+  tags: 'Tags',
+  madeWith: 'Transcribed and summarized on-device with WhisprNotes.',
+  aiDisclaimer: 'AI summaries can contain mistakes.',
+};
+
+// ASCII and Latin-1 punctuation and spaces, general punctuation, and the
+// CJK, full-width, Arabic and Devanagari marks that would be awkward in a
+// file name. Letters and digits of every script are kept.
+const NOT_FILE_NAME_SAFE =
+  /[\u0000-\u002f\u003a-\u0040\u005b-\u0060\u007b-\u00bf\u00d7\u00f7\u2000-\u206f\u3000-\u303f\uff00-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65\u060c\u061b\u061f\u06d4\u0964\u0965]+/g;
+
+/**
+ * File-name-safe slug: `Q3: Plan / Review!` → `q3-plan-review`. Titles in
+ * other scripts keep their letters (`会议记录` stays `会议记录`), so exports of
+ * non-Latin notes aren't all called "note".
+ */
 export function slugify(title: string): string {
-  const slug = title
+  const cleaned = title
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
+    .normalize('NFC')
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 60)
-    .replace(/-+$/g, '');
+    .replace(NOT_FILE_NAME_SAFE, '-')
+    .replace(/^-+|-+$/g, '');
+  // By code point, so a cut never lands inside a surrogate pair.
+  const slug = Array.from(cleaned).slice(0, 60).join('').replace(/-+$/g, '');
   return slug || 'note';
 }
 
@@ -54,42 +89,58 @@ export function usableSegments(segments: TranscriptSegment[] | null | undefined)
     .sort((a, b) => a.start - b.start);
 }
 
-export function formatNoteDate(date: Date): string {
-  return date.toLocaleString('en-US', {
+export function formatNoteDate(date: Date, locale = 'en-US'): string {
+  const options: Intl.DateTimeFormatOptions = {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  });
+  };
+  try {
+    return date.toLocaleString(locale, options);
+  } catch {
+    return date.toLocaleString('en-US', options);
+  }
 }
 
-function metaLine(note: Note): string {
+interface TextOptions {
+  labels?: ExportLabels;
+  /** BCP 47 tag for the date line. */
+  locale?: string;
+}
+
+function metaLine(note: Note, labels: ExportLabels, locale?: string): string {
   return [
-    formatNoteDate(note.createdAt),
+    formatNoteDate(note.createdAt, locale),
     note.duration > 0 ? formatClock(note.duration) : null,
-    note.tags.length > 0 ? `Tags: ${note.tags.join(', ')}` : null,
+    note.tags.length > 0 ? `${labels.tags}: ${note.tags.join(', ')}` : null,
   ]
     .filter(Boolean)
     .join(' · ');
 }
 
-function summaryText(summary: NoteSummary): string {
+function summaryText(summary: NoteSummary, labels: ExportLabels): string {
   const section = (heading: string, items: string[]) =>
-    items.length > 0 ? `\n${heading}\n${items.map((item) => `- ${item}`).join('\n')}\n` : '';
+    items.length > 0 ? `\n${heading.toUpperCase()}\n${items.map((item) => `- ${item}`).join('\n')}\n` : '';
   return (
-    `SUMMARY\n${summary.overview.trim()}\n` +
-    section('KEY POINTS', summary.keyPoints) +
-    section('ACTION ITEMS', summary.actionItems) +
-    section('DECISIONS', summary.decisions)
+    `${labels.summary.toUpperCase()}\n${summary.overview.trim()}\n` +
+    section(labels.keyPoints, summary.keyPoints) +
+    section(labels.actionItems, summary.actionItems) +
+    section(labels.decisions, summary.decisions)
   );
 }
 
-export function toText(note: Note, o: { scope: ExportScope }): string {
-  const parts = [`${note.title}\n${metaLine(note)}\n`];
-  if (note.summary) parts.push(summaryText(note.summary));
+export function toText(note: Note, o: { scope: ExportScope } & TextOptions): string {
+  const labels = o.labels ?? DEFAULT_EXPORT_LABELS;
+  const parts = [`${note.title}\n${metaLine(note, labels, o.locale)}\n`];
+  if (note.summary) parts.push(summaryText(note.summary, labels));
   if (o.scope === 'full' || !note.summary) {
-    parts.push(note.summary ? `TRANSCRIPT\n${note.transcription.trim()}\n` : `${note.transcription.trim()}\n`);
+    parts.push(
+      note.summary
+        ? `${labels.transcript.toUpperCase()}\n${note.transcription.trim()}\n`
+        : `${note.transcription.trim()}\n`
+    );
   }
   return parts.join('\n');
 }
@@ -125,8 +176,9 @@ function yamlString(value: string): string {
 
 export function toMarkdown(
   note: Note,
-  o: { scope: ExportScope; segments: TranscriptSegment[] | null; timestamps: boolean }
+  o: { scope: ExportScope; segments: TranscriptSegment[] | null; timestamps: boolean; labels?: ExportLabels }
 ): string {
+  const labels = o.labels ?? DEFAULT_EXPORT_LABELS;
   const front = [
     '---',
     `title: ${yamlString(note.title)}`,
@@ -143,10 +195,10 @@ export function toMarkdown(
   const parts: string[] = [front, `# ${note.title}`];
   const s = note.summary;
   if (s) {
-    if (s.overview) parts.push(`## Summary\n\n${s.overview.trim()}`);
-    if (s.keyPoints.length) parts.push(`## Key points\n\n${s.keyPoints.map((i) => `- ${i}`).join('\n')}`);
-    if (s.actionItems.length) parts.push(`## Action items\n\n${s.actionItems.map((i) => `- [ ] ${i}`).join('\n')}`);
-    if (s.decisions.length) parts.push(`## Decisions\n\n${s.decisions.map((i) => `- ${i}`).join('\n')}`);
+    if (s.overview) parts.push(`## ${labels.summary}\n\n${s.overview.trim()}`);
+    if (s.keyPoints.length) parts.push(`## ${labels.keyPoints}\n\n${s.keyPoints.map((i) => `- ${i}`).join('\n')}`);
+    if (s.actionItems.length) parts.push(`## ${labels.actionItems}\n\n${s.actionItems.map((i) => `- [ ] ${i}`).join('\n')}`);
+    if (s.decisions.length) parts.push(`## ${labels.decisions}\n\n${s.decisions.map((i) => `- ${i}`).join('\n')}`);
   }
 
   if (o.scope === 'full' || !s) {
@@ -155,7 +207,7 @@ export function toMarkdown(
       o.timestamps && segs.length > 0
         ? segs.map((seg) => `[${stamp(seg.start)}] ${seg.text.trim()}`).join('\n\n')
         : note.transcription.trim();
-    parts.push(s ? `## Transcript\n\n${body}` : body);
+    parts.push(s ? `## ${labels.transcript}\n\n${body}` : body);
   }
   return `${parts.join('\n\n')}\n`;
 }

@@ -2,7 +2,23 @@
  * Personal insights computed entirely on the phone from the notes table.
  * Pure: days are local calendar days, derived from the `now` passed in.
  */
-import type { Note } from '../../types';
+import { countWords } from '../text';
+
+/**
+ * What statistics need from a note. Rows from the notes list carry a stored
+ * word count, so no transcript is loaded; a full `Note` works too.
+ */
+export interface StatsNote {
+  source: 'recording' | 'import';
+  duration: number;
+  createdAt: Date;
+  tags: string[];
+  /** Words in the transcript; counted from `transcription` when absent. */
+  wordCount?: number;
+  transcription?: string;
+  hasSummary?: boolean;
+  summary?: unknown;
+}
 
 export interface Insights {
   totalNotes: number;
@@ -15,6 +31,12 @@ export interface Insights {
   last14Days: { date: string; minutes: number; notes: number }[];
   /** Recordings per hour of day, 0-23. */
   byHour: number[];
+  /** Recordings per day of week, 0 = Sunday. */
+  byWeekday: number[];
+  /** Average length of a recording, in minutes. */
+  avgMinutesPerRecording: number | null;
+  /** The busiest hour of day (0-23), or null with no recordings. */
+  peakHour: number | null;
   topTags: { tag: string; count: number }[];
   summariesGenerated: number;
   /** Typing the same words at 40 wpm, minus the time spent recording. */
@@ -38,20 +60,19 @@ function fromDayKey(key: string): Date {
   return new Date(y, m - 1, d);
 }
 
-function words(text: string): number {
-  const t = text.trim();
-  return t ? t.split(/\s+/).length : 0;
+function words(note: StatsNote): number {
+  return note.wordCount ?? countWords(note.transcription ?? '');
 }
 
-export function computeInsights(notes: Note[], now: Date): Insights {
+export function computeInsights(notes: StatsNote[], now: Date): Insights {
   const recorded = notes.filter((n) => n.source === 'recording' && n.duration > 0);
   const totalSeconds = recorded.reduce((s, n) => s + n.duration, 0);
-  const totalWords = notes.reduce((s, n) => s + words(n.transcription), 0);
+  const totalWords = notes.reduce((s, n) => s + words(n), 0);
 
   const wpmNotes = recorded.filter((n) => n.duration >= MIN_SECONDS_FOR_WPM);
   const wpmSeconds = wpmNotes.reduce((s, n) => s + n.duration, 0);
-  const wpmWords = wpmNotes.reduce((s, n) => s + words(n.transcription), 0);
-  const recordedWords = recorded.reduce((s, n) => s + words(n.transcription), 0);
+  const wpmWords = wpmNotes.reduce((s, n) => s + words(n), 0);
+  const recordedWords = recorded.reduce((s, n) => s + words(n), 0);
 
   // Streaks over local days with at least one recording.
   const days = new Set(recorded.map((n) => localDayKey(n.createdAt)));
@@ -77,6 +98,7 @@ export function computeInsights(notes: Note[], now: Date): Insights {
   });
   const index = new Map(last14Days.map((d, i) => [d.date, i]));
   const byHour = new Array<number>(24).fill(0);
+  const byWeekday = new Array<number>(7).fill(0);
   for (const n of recorded) {
     const i = index.get(localDayKey(n.createdAt));
     if (i !== undefined) {
@@ -84,7 +106,9 @@ export function computeInsights(notes: Note[], now: Date): Insights {
       last14Days[i].notes += 1;
     }
     byHour[n.createdAt.getHours()] += 1;
+    byWeekday[n.createdAt.getDay()] += 1;
   }
+  const busiest = Math.max(...byHour);
   for (const d of last14Days) d.minutes = Math.round(d.minutes * 10) / 10;
 
   const tagCounts = new Map<string, number>();
@@ -104,8 +128,11 @@ export function computeInsights(notes: Note[], now: Date): Insights {
     longestStreak,
     last14Days,
     byHour,
+    byWeekday,
+    avgMinutesPerRecording: recorded.length > 0 ? Math.round((totalSeconds / recorded.length / 60) * 10) / 10 : null,
+    peakHour: busiest > 0 ? byHour.indexOf(busiest) : null,
     topTags,
-    summariesGenerated: notes.filter((n) => n.summary).length,
+    summariesGenerated: notes.filter((n) => n.hasSummary ?? Boolean(n.summary)).length,
     minutesSaved: Math.max(0, Math.round(recordedWords / TYPING_WPM - totalSeconds / 60)),
   };
 }

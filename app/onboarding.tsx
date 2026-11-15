@@ -1,16 +1,20 @@
 /**
- * First launch: what WhisprNotes does, the privacy promise, what downloads
- * once (and that the internet is used only for that and purchases), and
- * microphone access.
+ * First launch: what WhisprNotes does, the privacy promise (nothing leaves
+ * the phone), what downloads once, and microphone access.
+ *
+ * Pages are shown one at a time rather than in a horizontal pager, so the
+ * flow reads the same in left-to-right and right-to-left languages.
  */
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { NativeScrollEvent, NativeSyntheticEvent, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { AudioManager } from 'react-native-audio-api';
 import Animated, {
   Easing,
+  FadeIn,
   useAnimatedStyle,
+  useReducedMotion,
   useSharedValue,
   withDelay,
   withRepeat,
@@ -20,16 +24,21 @@ import Animated, {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import LogoMark from '@/components/brand/LogoMark';
+import AnimatedPressable from '@/components/ui/AnimatedPressable';
 import Button from '@/components/ui/Button';
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
+import { languageLabel } from '@/constants/languages';
 import { FontSize, Spacing } from '@/constants/Spacing';
 import { Radius } from '@/constants/theme';
-import { MODEL_CATALOG, formatBytes } from '@/services/ai/modelCatalog';
+import { useI18n } from '@/i18n';
 import { detectTier } from '@/services/ai/device';
+import { effectiveLanguage } from '@/services/ai/language';
+import { MODEL_CATALOG, formatBytes } from '@/services/ai/modelCatalog';
+import { prefetchSpeechModel } from '@/services/ai/modelPrefetch';
 import { chooseLlm } from '@/services/ai/tiers';
 import { haptic } from '@/services/haptics';
-import { updateSettings } from '@/services/settings';
+import { updateSettings, useSettings } from '@/services/settings';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 const PAGES = 4;
@@ -38,23 +47,18 @@ export default function Onboarding() {
   const colors = Colors[useColorScheme() ?? 'light'];
   const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
-  const { width } = useWindowDimensions();
-  const scrollRef = useRef<ScrollView>(null);
+  const { t, language } = useI18n();
+  const [settings] = useSettings();
   const [page, setPage] = useState(0);
   const tier = detectTier();
   const llm = MODEL_CATALOG[chooseLlm(tier)];
-  const base = MODEL_CATALOG['whisper-base-en'];
+  const spoken = effectiveLanguage(settings.transcriptionLanguage, language);
+  // English records with the live-preview model; other languages with the multilingual one.
+  const speech = MODEL_CATALOG[spoken === 'en' ? 'whisper-base-en' : 'whisper-base'];
 
   const goTo = (next: number) => {
-    scrollRef.current?.scrollTo({ x: next * width, animated: true });
-  };
-
-  const onScrollEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const next = Math.round(e.nativeEvent.contentOffset.x / width);
-    if (next !== page) {
-      setPage(next);
-      void haptic('selection');
-    }
+    setPage(Math.max(0, Math.min(PAGES - 1, next)));
+    void haptic('selection');
   };
 
   const finish = async () => {
@@ -64,98 +68,126 @@ export default function Onboarding() {
       console.warn('Microphone permission request failed:', error);
     }
     await updateSettings({ onboardingCompleted: true });
+    // Start fetching the speech model for this language while the user looks around.
+    prefetchSpeechModel();
     void haptic('success');
     router.replace('/');
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView
-        ref={scrollRef}
-        horizontal
-        pagingEnabled
-        showsHorizontalScrollIndicator={false}
-        onMomentumScrollEnd={onScrollEnd}
-        bounces={false}
-      >
-        <Page width={width} styles={styles}>
-          <LogoMark size={88} />
-          <LiveWave color={colors.tint} />
-          <Text style={styles.title}>Speak. It's written.</Text>
-          <Text style={styles.body}>
-            Record meetings, ideas and memos. WhisprNotes turns them into accurate transcripts, summaries and action items.
-          </Text>
-        </Page>
+      <View style={styles.topBar}>
+        <AnimatedPressable
+          haptic="selection"
+          onPress={() => router.push({ pathname: '/language', params: { kind: 'app' } })}
+          style={styles.languageChip}
+          accessibilityRole="button"
+          accessibilityLabel={`${t('lang.title.app')}: ${languageLabel(language)}`}
+        >
+          <Ionicons name="globe-outline" size={15} color={colors.tint} />
+          <Text style={styles.languageChipText}>{languageLabel(language)}</Text>
+          <Ionicons name="chevron-down" size={13} color={colors.textMuted} />
+        </AnimatedPressable>
+      </View>
 
-        <Page width={width} styles={styles}>
-          <View style={styles.iconHero}>
-            <Ionicons name="shield-checkmark" size={44} color={colors.tint} />
-          </View>
-          <Text style={styles.title}>Your voice never leaves this phone.</Text>
-          <View style={styles.points}>
-            <Point styles={styles} color={colors.tint} icon="phone-portrait-outline" text="Transcription and AI summaries run on your phone, even in airplane mode." />
-            <Point styles={styles} color={colors.tint} icon="person-remove-outline" text="No account. No analytics. No ads. No tracking." />
-            <Point styles={styles} color={colors.tint} icon="lock-closed-outline" text="Nothing is shared unless you share it." />
-          </View>
-        </Page>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <Animated.View key={page} entering={FadeIn.duration(220)} style={styles.page}>
+          {page === 0 && (
+            <>
+              <LogoMark size={88} />
+              <LiveWave color={colors.tint} />
+              <Text style={styles.title}>{t('onboarding.welcomeTitle')}</Text>
+              <Text style={styles.body}>{t('onboarding.welcomeBody')}</Text>
+            </>
+          )}
 
-        <Page width={width} styles={styles}>
-          <View style={styles.iconHero}>
-            <Ionicons name="cloud-download-outline" size={44} color={colors.tint} />
-          </View>
-          <Text style={styles.title}>AI models install once.</Text>
-          <Text style={styles.body}>
-            To work offline, WhisprNotes downloads its AI models the first time they're needed. Wi-Fi recommended.
-          </Text>
-          <View style={styles.modelList}>
-            <ModelRow styles={styles} name="Live transcription" size={formatBytes(base.approxBytes)} when="now" />
-            <ModelRow styles={styles} name="Summaries & titles" size={formatBytes(llm.approxBytes)} when="first summary" />
-            {tier === 'flagship' && (
-              <ModelRow
-                styles={styles}
-                name="Large-v3 accuracy (Pro)"
-                size={formatBytes(MODEL_CATALOG['whisper-large-v3-turbo'].approxBytes)}
-                when="when you choose"
-              />
-            )}
-          </View>
-          <Text style={styles.fine}>The internet is used only for these downloads and for purchases. Never for your notes.</Text>
-        </Page>
+          {page === 1 && (
+            <>
+              <View style={styles.iconHero}>
+                <Ionicons name="shield-checkmark" size={44} color={colors.tint} />
+              </View>
+              <Text style={styles.title}>{t('onboarding.privacyTitle')}</Text>
+              <View style={styles.points}>
+                <Point styles={styles} color={colors.tint} icon="phone-portrait-outline" text={t('onboarding.privacyOnDevice')} />
+                <Point styles={styles} color={colors.tint} icon="person-remove-outline" text={t('onboarding.privacyNoAccount')} />
+                <Point styles={styles} color={colors.tint} icon="lock-closed-outline" text={t('onboarding.privacyShare')} />
+              </View>
+            </>
+          )}
 
-        <Page width={width} styles={styles}>
-          <View style={styles.iconHero}>
-            <Ionicons name="mic" size={44} color={colors.tint} />
-          </View>
-          <Text style={styles.title}>One last thing: the microphone.</Text>
-          <Text style={styles.body}>WhisprNotes listens only while you're recording.</Text>
-          <View style={styles.consent}>
-            <Ionicons name="people-outline" size={18} color={colors.textMuted} />
-            <Text style={styles.consentText}>Make sure everyone agrees to be recorded. Recording laws differ by place.</Text>
-          </View>
-        </Page>
+          {page === 2 && (
+            <>
+              <View style={styles.iconHero}>
+                <Ionicons name="cloud-download-outline" size={44} color={colors.tint} />
+              </View>
+              <Text style={styles.title}>{t('onboarding.modelsTitle')}</Text>
+              <Text style={styles.body}>{t('onboarding.modelsBody')}</Text>
+              <View style={styles.modelList}>
+                <ModelRow
+                  styles={styles}
+                  name={t('onboarding.modelSpeech', { language: languageLabel(spoken) })}
+                  size={formatBytes(speech.approxBytes)}
+                  when={t('onboarding.whenNow')}
+                />
+                <ModelRow
+                  styles={styles}
+                  name={t('onboarding.modelSummaries')}
+                  size={formatBytes(llm.approxBytes)}
+                  when={t('onboarding.whenFirstSummary')}
+                />
+                {tier === 'flagship' && (
+                  <ModelRow
+                    styles={styles}
+                    name={t('onboarding.modelTurbo')}
+                    size={formatBytes(MODEL_CATALOG['whisper-large-v3-turbo'].approxBytes)}
+                    when={t('onboarding.whenYouChoose')}
+                  />
+                )}
+              </View>
+              <Text style={styles.fine}>{t('onboarding.modelsFine')}</Text>
+            </>
+          )}
+
+          {page === 3 && (
+            <>
+              <View style={styles.iconHero}>
+                <Ionicons name="mic" size={44} color={colors.tint} />
+              </View>
+              <Text style={styles.title}>{t('onboarding.micTitle')}</Text>
+              <Text style={styles.body}>{t('onboarding.micBody')}</Text>
+              <View style={styles.consent}>
+                <Ionicons name="people-outline" size={18} color={colors.textMuted} />
+                <Text style={styles.consentText}>{t('onboarding.consent')}</Text>
+              </View>
+            </>
+          )}
+        </Animated.View>
       </ScrollView>
 
       <View style={styles.footer}>
-        <View style={styles.dots} accessibilityLabel={`Page ${page + 1} of ${PAGES}`}>
+        <View style={styles.dots} accessibilityLabel={t('onboarding.pageOf', { page: page + 1, total: PAGES })}>
           {Array.from({ length: PAGES }, (_, i) => (
             <View key={i} style={[styles.dot, i === page && styles.dotActive]} />
           ))}
         </View>
         {page < PAGES - 1 ? (
           <View style={styles.footerButtons}>
-            <Button label="Skip" variant="ghost" onPress={() => goTo(PAGES - 1)} style={{ flex: 1 }} />
-            <Button label="Next" onPress={() => goTo(page + 1)} style={{ flex: 2 }} />
+            {page === 0 ? (
+              <Button label={t('onboarding.skip')} variant="ghost" onPress={() => goTo(PAGES - 1)} style={{ flex: 1 }} />
+            ) : (
+              <Button label={t('common.back')} variant="ghost" onPress={() => goTo(page - 1)} style={{ flex: 1 }} />
+            )}
+            <Button label={t('onboarding.next')} onPress={() => goTo(page + 1)} style={{ flex: 2 }} />
           </View>
         ) : (
-          <Button label="Allow microphone & start" icon="mic" onPress={finish} haptic="medium" />
+          <View style={styles.footerButtons}>
+            <Button label={t('common.back')} variant="ghost" onPress={() => goTo(page - 1)} style={{ flex: 1 }} />
+            <Button label={t('onboarding.start')} icon="mic" onPress={finish} haptic="medium" style={{ flex: 2 }} />
+          </View>
         )}
       </View>
     </SafeAreaView>
   );
-}
-
-function Page({ width, styles, children }: { width: number; styles: ReturnType<typeof createStyles>; children: React.ReactNode }) {
-  return <View style={[styles.page, { width }]}>{children}</View>;
 }
 
 function Point({ styles, color, icon, text }: { styles: ReturnType<typeof createStyles>; color: string; icon: IconName; text: string }) {
@@ -172,7 +204,7 @@ function ModelRow({ styles, name, size, when }: { styles: ReturnType<typeof crea
     <View style={styles.modelRow}>
       <View style={{ flex: 1 }}>
         <Text style={styles.modelName}>{name}</Text>
-        <Text style={styles.modelWhen}>Downloads {when}</Text>
+        <Text style={styles.modelWhen}>{when}</Text>
       </View>
       <Text style={styles.modelSize}>{size}</Text>
     </View>
@@ -192,8 +224,10 @@ function LiveWave({ color }: { color: string }) {
 }
 
 function WaveBar({ height, delay, color }: { height: number; delay: number; color: string }) {
-  const v = useSharedValue(0.3);
+  const reduceMotion = useReducedMotion();
+  const v = useSharedValue(reduceMotion ? height : 0.3);
   useEffect(() => {
+    if (reduceMotion) return;
     v.value = withDelay(
       delay,
       withRepeat(
@@ -204,7 +238,7 @@ function WaveBar({ height, delay, color }: { height: number; delay: number; colo
         -1
       )
     );
-  }, [v, height, delay]);
+  }, [v, height, delay, reduceMotion]);
   const style = useAnimatedStyle(() => ({ height: 8 + v.value * 40 }));
   return <Animated.View style={[{ width: 7, borderRadius: 4, backgroundColor: color }, style]} />;
 }
@@ -212,7 +246,19 @@ function WaveBar({ height, delay, color }: { height: number; delay: number; colo
 function createStyles(colors: typeof Colors.light) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
-    page: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing.xxl, gap: Spacing.md },
+    topBar: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: Spacing.xl, paddingTop: Spacing.sm },
+    languageChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      backgroundColor: colors.surface,
+      borderRadius: Radius.pill,
+      paddingHorizontal: Spacing.md,
+      minHeight: 36,
+    },
+    languageChipText: { fontSize: FontSize.sm, fontWeight: '700', color: colors.text },
+    scroll: { flexGrow: 1, justifyContent: 'center' },
+    page: { alignItems: 'center', paddingHorizontal: Spacing.xxl, paddingVertical: Spacing.xl, gap: Spacing.md },
     iconHero: {
       width: 96,
       height: 96,
@@ -229,7 +275,7 @@ function createStyles(colors: typeof Colors.light) {
     point: { flexDirection: 'row', gap: Spacing.md, alignItems: 'flex-start' },
     pointText: { flex: 1, fontSize: FontSize.md, color: colors.text, lineHeight: 22 },
     modelList: { alignSelf: 'stretch', backgroundColor: colors.card, borderRadius: Radius.lg, padding: Spacing.md, gap: Spacing.md, marginTop: Spacing.sm },
-    modelRow: { flexDirection: 'row', alignItems: 'center' },
+    modelRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
     modelName: { fontSize: FontSize.md, fontWeight: '600', color: colors.text },
     modelWhen: { fontSize: FontSize.xs, color: colors.textMuted },
     modelSize: { fontSize: FontSize.sm, fontWeight: '700', color: colors.text, fontVariant: ['tabular-nums'] },

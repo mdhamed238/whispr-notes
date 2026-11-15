@@ -6,7 +6,11 @@
 export type DeviceTier = 'flagship' | 'standard' | 'lite';
 export const DEVICE_TIERS: DeviceTier[] = ['flagship', 'standard', 'lite'];
 
-export type EngineId = 'whisper-large-v3-turbo' | 'whisper-small' | 'whisper-base-en';
+/**
+ * `whisper-base` is the multilingual Base model (whisper.cpp); `whisper-base-en`
+ * is the English-only one (ExecuTorch), which is also the live-preview model.
+ */
+export type EngineId = 'whisper-large-v3-turbo' | 'whisper-small' | 'whisper-base' | 'whisper-base-en';
 export type LlmId = 'qwen3-1.7b' | 'qwen3-0.6b';
 
 const GiB = 2 ** 30;
@@ -30,27 +34,60 @@ export function resolveTier(d: {
   return 'lite';
 }
 
-const FALLBACK: Record<EngineId, EngineId | null> = {
-  'whisper-large-v3-turbo': 'whisper-small',
-  'whisper-small': 'whisper-base-en',
-  'whisper-base-en': null,
-};
+/** The compact engine for a language: English-only Base, or multilingual Base. */
+export function baseEngineFor(language: string): EngineId {
+  return language === 'en' ? 'whisper-base-en' : 'whisper-base';
+}
 
-/** The engine for the post-recording pass. Free users always get Base. */
+/**
+ * The next engine to try when one can't load. English ends on the
+ * multilingual Base, which runs on a different runtime (whisper.cpp) and so
+ * can still work when ExecuTorch can't; other languages have nothing below it.
+ */
+export function fallbackEngine(engine: EngineId, language: string): EngineId | null {
+  switch (engine) {
+    case 'whisper-large-v3-turbo':
+      return 'whisper-small';
+    case 'whisper-small':
+      return baseEngineFor(language);
+    case 'whisper-base-en':
+      return 'whisper-base';
+    case 'whisper-base':
+      return null;
+  }
+}
+
+/**
+ * The engine for the post-recording pass. Everyone gets a transcript in
+ * their language (Base); Pro adds the larger models the phone can run.
+ * `language` is the language being transcribed (never 'auto').
+ */
 export function chooseEngine(a: {
   tier: DeviceTier;
   isPro: boolean;
   override: DeviceTier | null;
   failedEngines: string[];
+  language?: string;
 }): EngineId {
-  if (!a.isPro) return 'whisper-base-en';
+  const language = a.language ?? 'en';
   const tier = a.override ?? a.tier;
   let engine: EngineId =
-    tier === 'flagship' ? 'whisper-large-v3-turbo' : tier === 'standard' ? 'whisper-small' : 'whisper-base-en';
-  while (a.failedEngines.includes(engine) && FALLBACK[engine]) {
-    engine = FALLBACK[engine]!;
+    !a.isPro || tier === 'lite'
+      ? baseEngineFor(language)
+      : tier === 'flagship'
+        ? 'whisper-large-v3-turbo'
+        : 'whisper-small';
+  while (a.failedEngines.includes(engine)) {
+    const next = fallbackEngine(engine, language);
+    if (!next) break;
+    engine = next;
   }
   return engine;
+}
+
+/** Engines that read the file in windows, so recording length doesn't matter. */
+export function handlesLongAudio(engine: EngineId): boolean {
+  return engine === 'whisper-large-v3-turbo' || engine === 'whisper-base';
 }
 
 export function chooseLlm(tier: DeviceTier): LlmId {

@@ -3,38 +3,42 @@ import { Tabs } from 'expo-router';
 import React from 'react';
 import type { ColorValue } from 'react-native';
 
-import FloatingTabBar from '@/components/ui/FloatingTabBar';
+import TabBar from '@/components/ui/TabBar';
+import { useI18n } from '@/i18n';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
 function tabIcon(active: IconName, inactive: IconName) {
-  return ({ focused, color }: { focused: boolean; color: ColorValue }) => (
-    <Ionicons name={focused ? active : inactive} size={22} color={color as string} />
+  return ({ focused, color, size }: { focused: boolean; color: ColorValue; size: number }) => (
+    <Ionicons name={focused ? active : inactive} size={size} color={color as string} />
   );
 }
 
 export default function TabLayout() {
+  const { t } = useI18n();
   return (
     <Tabs
-      tabBar={(props) => <FloatingTabBar {...props} />}
+      tabBar={(props) => <TabBar {...props} />}
       screenOptions={{
-        // Each screen renders its own header; the floating tab bar replaces
-        // the default chrome. Cross-fade between tabs reads smoother than a
-        // hard cut.
+        // Each screen renders its own header. Tabs switch instantly, as
+        // they do in the platforms' own tab bars.
         headerShown: false,
-        animation: 'fade',
+        animation: 'none',
       }}
     >
-      <Tabs.Screen name="index" options={{ title: 'Record', tabBarIcon: tabIcon('mic', 'mic-outline') }} />
+      <Tabs.Screen name="index" options={{ title: t('tabs.record'), tabBarIcon: tabIcon('mic', 'mic-outline') }} />
       <Tabs.Screen
         name="notes"
-        options={{ title: 'Notes', tabBarIcon: tabIcon('document-text', 'document-text-outline') }}
+        options={{ title: t('tabs.notes'), tabBarIcon: tabIcon('document-text', 'document-text-outline') }}
       />
       <Tabs.Screen
         name="insights"
-        options={{ title: 'Insights', tabBarIcon: tabIcon('stats-chart', 'stats-chart-outline') }}
+        options={{ title: t('tabs.insights'), tabBarIcon: tabIcon('stats-chart', 'stats-chart-outline') }}
       />
-      <Tabs.Screen name="settings" options={{ title: 'Settings', tabBarIcon: tabIcon('settings', 'settings-outline') }} />
+      <Tabs.Screen
+        name="settings"
+        options={{ title: t('tabs.settings'), tabBarIcon: tabIcon('settings', 'settings-outline') }}
+      />
     </Tabs>
   );
 }

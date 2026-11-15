@@ -16,7 +16,7 @@ import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { FontSize, Spacing } from '@/constants/Spacing';
 import { Radius } from '@/constants/theme';
-import { usePro } from '@/hooks/usePro';
+import { useI18n, type TKey } from '@/i18n';
 import { haptic } from '@/services/haptics';
 import { Paths } from 'expo-file-system';
 
@@ -33,12 +33,29 @@ function parseReport(raw: string | undefined): ImportReport | null {
   }
 }
 
+/**
+ * The importer reports problems in English (its messages are pinned by
+ * tests); known ones are shown translated, anything else as written.
+ */
+const REASONS: [RegExp, TKey][] = [
+  [/unsupported file type/i, 'import.reason.unsupported'],
+  [/could not read/i, 'import.reason.unreadable'],
+  [/more than \d+ notes/i, 'import.reason.tooMany'],
+  [/50 MB import limit/i, 'import.reason.archiveBudget'],
+  [/larger than 100 MB/i, 'import.reason.archiveTooLarge'],
+  [/too large|larger than 10 MB/i, 'import.reason.fileTooLarge'],
+];
+
 export default function ImportScreen() {
   const params = useLocalSearchParams<{ report?: string; uri?: string }>();
   const colors = Colors[useColorScheme() ?? 'light'];
   const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
-  const { isPro, loading: proLoading } = usePro();
+  const { t, tp } = useI18n();
+  const reasonText = (reason: string) => {
+    const known = REASONS.find(([pattern]) => pattern.test(reason));
+    return known ? t(known[1]) : reason;
+  };
   const [report, setReport] = useState<ImportReport | null>(() => parseReport(params.report));
   const [running, setRunning] = useState(false);
   const incoming = params.uri && !params.report ? params.uri : null;
@@ -48,10 +65,6 @@ export default function ImportScreen() {
   // A file from another app is only imported after the user confirms it.
   const confirmIncoming = async () => {
     if (!incoming || !incomingOk) return;
-    if (!isPro) {
-      router.replace('/paywall');
-      return;
-    }
     setRunning(true);
     try {
       setReport(await importFiles([{ uri: incoming, name: incomingName }]));
@@ -68,28 +81,22 @@ export default function ImportScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ModalHeader title="Import" variant="close" />
+      <ModalHeader title={t('import.title')} variant="close" />
       <ScrollView contentContainerStyle={styles.content}>
         {incoming && !report && !running ? (
           <View style={{ gap: Spacing.lg }}>
             <View style={[styles.hero, { backgroundColor: colors.card }]}>
               <Ionicons name={incomingOk ? 'document-text-outline' : 'alert-circle-outline'} size={40} color={incomingOk ? colors.tint : colors.danger} />
-              <Text style={styles.heroTitle}>{incomingOk ? `Import “${incomingName}”?` : "This file can't be imported"}</Text>
-              <Text style={styles.muted}>
-                {incomingOk
-                  ? 'Its notes are added to WhisprNotes on this phone. Nothing is uploaded.'
-                  : 'Open a Markdown, text, Evernote or zip file shared from another app.'}
-              </Text>
+              <Text style={styles.heroTitle}>{incomingOk ? t('import.confirmTitle', { name: incomingName }) : t('import.cantTitle')}</Text>
+              <Text style={styles.muted}>{incomingOk ? t('import.confirmBody') : t('import.cantBody')}</Text>
             </View>
-            {incomingOk && (
-              <Button label={isPro || proLoading ? 'Import' : 'Import with Pro'} icon="download-outline" onPress={confirmIncoming} />
-            )}
-            <Button label="Cancel" variant="secondary" onPress={() => router.back()} />
+            {incomingOk && <Button label={t('import.action')} icon="download-outline" onPress={confirmIncoming} />}
+            <Button label={t('common.cancel')} variant="secondary" onPress={() => router.back()} />
           </View>
         ) : running || !report ? (
           <View style={styles.center}>
             <ActivityIndicator color={colors.tint} />
-            <Text style={styles.muted}>Importing…</Text>
+            <Text style={styles.muted}>{t('import.running')}</Text>
           </View>
         ) : (
           <Animated.View entering={FadeInDown.duration(300)} style={{ gap: Spacing.lg }}>
@@ -100,20 +107,14 @@ export default function ImportScreen() {
                 color={report.imported > 0 ? colors.success : colors.textMuted}
               />
               <Text style={styles.heroTitle}>
-                {report.imported > 0
-                  ? `${report.imported} note${report.imported === 1 ? '' : 's'} imported`
-                  : 'Nothing new to import'}
+                {report.imported > 0 ? tp('import.imported', report.imported) : t('import.nothingNew')}
               </Text>
-              {report.duplicates > 0 && (
-                <Text style={styles.muted}>
-                  {report.duplicates} already in WhisprNotes, skipped.
-                </Text>
-              )}
+              {report.duplicates > 0 && <Text style={styles.muted}>{tp('import.duplicates', report.duplicates)}</Text>}
             </View>
 
             {report.failed.length > 0 && (
               <View style={styles.failures}>
-                <Text style={styles.sectionTitle}>Couldn't import</Text>
+                <Text style={styles.sectionTitle}>{t('import.failedTitle')}</Text>
                 {report.failed.map((f, i) => (
                   <View key={`${f.name}-${i}`} style={styles.failRow}>
                     <Ionicons name="alert-circle-outline" size={16} color={colors.danger} />
@@ -121,19 +122,17 @@ export default function ImportScreen() {
                       <Text style={styles.failName} numberOfLines={1}>
                         {f.name}
                       </Text>
-                      <Text style={styles.failReason}>{f.reason}</Text>
+                      <Text style={styles.failReason}>{reasonText(f.reason)}</Text>
                     </View>
                   </View>
                 ))}
               </View>
             )}
 
-            <Text style={styles.muted}>
-              Supported: Markdown (.md), text (.txt), Evernote (.enex) and .zip exports from Notion, Obsidian or Bear.
-            </Text>
+            <Text style={styles.muted}>{t('import.supported')}</Text>
 
             <Button
-              label="View notes"
+              label={t('import.viewNotes')}
               icon="document-text-outline"
               onPress={() => {
                 router.dismissAll();

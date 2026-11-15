@@ -13,24 +13,28 @@
  * Results are written with compare-and-swap: if the user edited the
  * transcript while the job ran, their text wins and the result is dropped.
  */
+import { getAppLanguage } from '../../i18n';
 import * as notesRepo from '../db/notesRepo';
 import { getDb } from '../db/database';
 import { isProNow } from '../billing/entitlement';
 import { peekSettings, updateSettings } from '../settings';
+import { releaseLiveWhisperNow } from '../liveWhisper';
 import { saveTimeline } from '../timelineStore';
 import { detectTier } from './device';
 import { createExecutorchEngine } from './engines/executorchEngine';
 import { AbortedError, EngineLoadError, type TranscriptionEngine } from './engines/types';
 import { createWhisperRnEngine } from './engines/whisperRnEngine';
 import { Job, JobKind, isTransientEngineError, nextJob, recoverJobs } from './jobState';
+import { effectiveLanguage, engineLanguage } from './language';
+import { MODEL_CATALOG } from './modelCatalog';
 import * as modelManager from './modelManager';
-import { chooseEngine, type EngineId } from './tiers';
+import { setEnhanceProgress } from './progressStore';
+import { chooseEngine, fallbackEngine, handlesLongAudio, type EngineId } from './tiers';
 
 /** ExecuTorch engines transcribe the whole file in one call; past this they'd stall for too long. */
 const EXECUTORCH_MAX_SECONDS = 1800;
-const PROGRESS_WRITE_INTERVAL_MS = 1000;
 
-type Runner = (noteId: string, signal: AbortSignal) => Promise<void>;
+type Runner = (noteId: string, signal: AbortSignal, job: Job) => Promise<void>;
 const runners: Partial<Record<JobKind, Runner>> = { enhance: runEnhance };
 
 export function registerJobRunner(kind: JobKind, runner: Runner): void {
@@ -153,7 +157,7 @@ async function pump(): Promise<void> {
 
       try {
         const runner = runners[job.kind];
-        if (runner) await runner(job.noteId, controller.signal);
+        if (runner) await runner(job.noteId, controller.signal, running);
         await removeJob(job.noteId, job.kind);
       } catch (error) {
         if (error instanceof AbortedError || controller.signal.aborted) {
@@ -165,7 +169,8 @@ async function pump(): Promise<void> {
           const failed = new Set(peekSettings().failedEngines);
           failed.add(error.engine);
           await updateSettings({ failedEngines: [...failed] });
-          const giveUp = error.engine === 'whisper-base-en';
+          const spoken = effectiveLanguage(peekSettings().transcriptionLanguage, getAppLanguage());
+          const giveUp = fallbackEngine(error.engine, spoken) === null;
           await saveJob({ ...running, state: giveUp ? 'failed' : 'pending' });
           if (giveUp) {
             await notesRepo.updateNote(job.noteId, { enhancement: 'failed', enhancementProgress: 0 }).catch(() => undefined);
@@ -201,33 +206,80 @@ async function releaseEngine(): Promise<void> {
 async function getEngine(id: EngineId): Promise<TranscriptionEngine> {
   if (engine?.id === id) return engine;
   await releaseEngine();
+  // The live preview keeps its model for a moment after a recording; free it
+  // first so two speech models are never loaded together.
+  await releaseLiveWhisperNow();
   engine =
-    id === 'whisper-large-v3-turbo'
-      ? await createWhisperRnEngine()
+    id === 'whisper-large-v3-turbo' || id === 'whisper-base'
+      ? await createWhisperRnEngine(id)
       : await createExecutorchEngine(id === 'whisper-small' ? 'small' : 'base');
   return engine;
 }
 
-/** Picks the engine, skipping Turbo when its weights aren't downloaded yet. */
-function pickEngine(durationSeconds: number): EngineId {
+/**
+ * The engine for this recording and the language to give it, or null when
+ * nothing on this phone can do it (the transcript it already has is kept).
+ */
+function pickEngine(durationSeconds: number): { id: EngineId; language: string } | null {
   const settings = peekSettings();
+  const appLanguage = getAppLanguage();
+  const pro = isProNow();
+  const turboReady = modelManager.status('whisper-large-v3-turbo') === 'ready';
   const failed = [...settings.failedEngines];
-  if (modelManager.status('whisper-large-v3-turbo') !== 'ready') failed.push('whisper-large-v3-turbo');
-  let id = chooseEngine({ tier: detectTier(), isPro: isProNow(), override: settings.tierOverride, failedEngines: failed });
-  // Long recordings need the engine that streams through the file.
-  if (id !== 'whisper-large-v3-turbo' && durationSeconds > EXECUTORCH_MAX_SECONDS) {
-    id = modelManager.status('whisper-large-v3-turbo') === 'ready' ? 'whisper-large-v3-turbo' : id;
+  // Turbo is a large download the user starts themselves: skip it until installed.
+  if (!turboReady) failed.push('whisper-large-v3-turbo');
+
+  let id: EngineId | null = chooseEngine({
+    tier: detectTier(),
+    isPro: pro,
+    override: settings.tierOverride,
+    failedEngines: failed,
+    language: effectiveLanguage(settings.transcriptionLanguage, appLanguage),
+  });
+  // Long recordings need an engine that reads the file in windows.
+  if (!handlesLongAudio(id) && durationSeconds > EXECUTORCH_MAX_SECONDS) {
+    const longForm: EngineId[] = pro && turboReady ? ['whisper-large-v3-turbo', 'whisper-base'] : ['whisper-base'];
+    id = longForm.find((candidate) => !settings.failedEngines.includes(candidate)) ?? null;
   }
-  return id;
+  if (!id || settings.failedEngines.includes(id)) return null;
+  return { id, language: engineLanguage(id, settings.transcriptionLanguage, appLanguage) };
 }
 
-async function runEnhance(noteId: string, signal: AbortSignal): Promise<void> {
+/** Resolves with the task, or rejects as soon as the signal aborts. */
+function raceAbort<T>(task: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new AbortedError());
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new AbortedError());
+    signal.addEventListener('abort', onAbort, { once: true });
+    task.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
+}
+
+/**
+ * Fetches a model WhisprNotes hosts itself (the multilingual Base model) the
+ * first time a recording needs it. Cancelling the note's job stops the wait,
+ * not the download: the next recording will want the model too.
+ */
+async function ensureModel(id: EngineId, noteId: string, signal: AbortSignal): Promise<void> {
+  if (MODEL_CATALOG[id].delivery !== 'manual' || modelManager.status(id) === 'ready') return;
+  setEnhanceProgress(noteId, { phase: 'model', fraction: modelManager.progress(id) });
+  const unsubscribe = modelManager.subscribeModels((modelId, _status, fraction) => {
+    if (modelId === id) setEnhanceProgress(noteId, { phase: 'model', fraction });
+  });
+  try {
+    await raceAbort(modelManager.ensure(id), signal);
+  } finally {
+    unsubscribe();
+  }
+}
+
+async function runEnhance(noteId: string, signal: AbortSignal, job: Job): Promise<void> {
   const note = await notesRepo.getNote(noteId);
   if (!note?.audioUri) return;
 
-  const engineId = pickEngine(note.duration);
-  if (engineId !== 'whisper-large-v3-turbo' && note.duration > EXECUTORCH_MAX_SECONDS) {
-    // Too long for a one-shot pass on this engine; keep the live transcript.
+  const picked = pickEngine(note.duration);
+  if (!picked) {
+    // Nothing here can transcribe it; keep whatever text the note has.
     await notesRepo.updateNote(noteId, { enhancement: 'none', enhancementProgress: 0 });
     return;
   }
@@ -237,44 +289,46 @@ async function runEnhance(noteId: string, signal: AbortSignal): Promise<void> {
   await notesRepo.updateNote(noteId, { enhancement: 'running', enhancementProgress: 0 });
   const transcriptAtStart = note.transcription;
 
-  let lastWrite = 0;
-  const onProgress = (fraction: number) => {
-    const now = Date.now();
-    if (now - lastWrite < PROGRESS_WRITE_INTERVAL_MS) return;
-    lastWrite = now;
-    void notesRepo.updateNote(noteId, { enhancementProgress: fraction }).catch(() => undefined);
-  };
+  try {
+    await ensureModel(picked.id, noteId, signal);
+    setEnhanceProgress(noteId, { phase: 'transcribing', fraction: 0 });
 
-  const e = await getEngine(engineId);
-  const result = await e.transcribeFile(note.audioUri, {
-    language: peekSettings().transcriptionLanguage,
-    onProgress,
-    signal,
-  });
+    const e = await getEngine(picked.id);
+    const result = await e.transcribeFile(note.audioUri, {
+      language: picked.language,
+      languageHint: getAppLanguage(),
+      // A job that already took the app down once is retried conservatively.
+      safeMode: job.attempts > 1,
+      onProgress: (fraction) => setEnhanceProgress(noteId, { phase: 'transcribing', fraction }),
+      signal,
+    });
 
-  const stored = await notesRepo.getNote(noteId);
-  if (!stored) return;
-  // The user's edit wins outright; timings would describe replaced words.
-  if (!result || stored.transcription !== transcriptAtStart) {
-    await notesRepo.updateNote(noteId, { enhancement: 'done', enhancementProgress: 1 });
-    return;
-  }
+    const stored = await notesRepo.getNote(noteId);
+    if (!stored) return;
+    // The user's edit wins outright; timings would describe replaced words.
+    if (!result || stored.transcription !== transcriptAtStart) {
+      await notesRepo.updateNote(noteId, { enhancement: 'done', enhancementProgress: 1 });
+      return;
+    }
 
-  const written = await notesRepo.updateNote(
-    noteId,
-    { transcription: result.text, language: result.language, enhancement: 'done', enhancementProgress: 1 },
-    { expectUpdatedAt: stored.updatedAt }
-  );
-  if (!written) {
-    // An edit landed between the read and the write: keep it.
-    await notesRepo.updateNote(noteId, { enhancement: 'done', enhancementProgress: 1 });
-    return;
-  }
-  // Only once the text it describes is the stored text.
-  if (result.segments.length > 0) saveTimeline(noteId, result.segments);
+    const written = await notesRepo.updateNote(
+      noteId,
+      { transcription: result.text, language: result.language, enhancement: 'done', enhancementProgress: 1 },
+      { expectUpdatedAt: stored.updatedAt }
+    );
+    if (!written) {
+      // An edit landed between the read and the write: keep it.
+      await notesRepo.updateNote(noteId, { enhancement: 'done', enhancementProgress: 1 });
+      return;
+    }
+    // Only once the text it describes is the stored text.
+    if (result.segments.length > 0) saveTimeline(noteId, result.segments);
 
-  // Summary or AI title next (the runner decides which, see summarizer).
-  if (runners.summarize) {
-    await saveJob({ noteId, kind: 'summarize', state: 'pending', attempts: 0, createdAt: new Date().toISOString() });
+    // Summary or AI title next (the runner decides which, see summarizer).
+    if (runners.summarize) {
+      await saveJob({ noteId, kind: 'summarize', state: 'pending', attempts: 0, createdAt: new Date().toISOString() });
+    }
+  } finally {
+    setEnhanceProgress(noteId, null);
   }
 }

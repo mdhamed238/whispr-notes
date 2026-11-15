@@ -12,17 +12,21 @@ export default function HourHeatmap({
   color,
   emptyColor,
   mutedColor,
+  formatHour,
+  accessibilityLabel,
 }: {
   byHour: number[];
   color: string;
   emptyColor: string;
   mutedColor: string;
+  /** Hour of day (0-23) as the user's locale writes it. */
+  formatHour: (hour: number) => string;
+  accessibilityLabel: string;
 }) {
   const max = Math.max(...byHour, 0);
-  const peak = max > 0 ? byHour.indexOf(max) : -1;
-  const fmt = (h: number) => `${h % 12 === 0 ? 12 : h % 12}${h < 12 ? 'am' : 'pm'}`;
+  const fmt = formatHour;
   return (
-    <View accessibilityLabel={peak >= 0 ? `You record most around ${fmt(peak)}` : 'No recordings yet'}>
+    <View accessibilityLabel={accessibilityLabel}>
       <View style={styles.row}>
         {byHour.map((count, h) => {
           const alpha = max > 0 && count > 0 ? 0.25 + 0.75 * (count / max) : 0;

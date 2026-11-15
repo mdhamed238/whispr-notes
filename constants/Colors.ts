@@ -16,7 +16,7 @@ export const Brand = {
 const tintColorLight = '#E8553B';
 const tintColorDark = '#FF7A5C';
 
-// Shared dark, floating pill color for the bottom tab bar in both themes.
+// Dark brand surface used in both themes (the Pro card in Settings).
 const navBackground = Brand.ink;
 
 const light = {

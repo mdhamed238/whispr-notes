@@ -1,8 +1,9 @@
-import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { Ionicons } from '@expo/vector-icons';
 import { useFonts } from 'expo-font';
 import { Stack, useRootNavigationState, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
+import { I18nManager, InteractionManager } from 'react-native';
 // SDK 56 dropped expo-router's react-navigation compatibility, and
 // executorch 0.10 moved the timestamped transcription API (verbose segments)
 // behind its `/legacy` entry point — the new root API returns plain strings
@@ -17,14 +18,19 @@ import { useColorScheme } from '@/components/useColorScheme';
 import { ActionSheetProvider } from '@/components/ui/ActionSheet';
 import { ToastProvider } from '@/components/ui/Toast';
 import Colors from '@/constants/Colors';
+import { applyLanguagePreference, syncLayoutDirection } from '@/i18n';
 import * as enhanceQueue from '@/services/ai/enhanceQueue';
-import { clearExports } from '@/services/export/exporter';
-import { sweepOrphanFiles } from '@/services/db/notesRepo';
-import { initPurchases } from '@/services/billing/purchases';
+import { excludeModelsFromBackup } from '@/services/ai/modelManager';
+import { prefetchSpeechModel } from '@/services/ai/modelPrefetch';
+import { withoutDownloadReports } from '@/services/ai/quietResourceFetcher';
 import '@/services/ai/summarizer';
-import { getSettings, peekSettings } from '@/services/settings';
+import { initPurchases } from '@/services/billing/purchases';
+import { sweepOrphanFiles } from '@/services/db/notesRepo';
+import { clearExports } from '@/services/export/exporter';
+import { getSettings, peekSettings, subscribeSettings } from '@/services/settings';
 
-initExecutorch({ resourceFetcher: ExpoResourceFetcher });
+// Wrapped so the library can't report model downloads to its analytics endpoint.
+initExecutorch({ resourceFetcher: withoutDownloadReports(ExpoResourceFetcher) });
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -39,32 +45,46 @@ export const unstable_settings = {
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
-export default function RootLayout() {
-  const [fontsLoaded, error] = useFonts({
-    SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
-    ...FontAwesome.font,
+/** Work the first screen doesn't depend on; runs once it has been drawn. */
+function runAfterLaunch(): void {
+  InteractionManager.runAfterInteractions(() => {
+    // Resume AI work a previous session left unfinished.
+    void enhanceQueue.start();
+    // Export files are only needed until shared; don't let them pile up.
+    clearExports();
+    // Files a killed app left behind (e.g. during a delete's undo window).
+    void sweepOrphanFiles(Date.now()).catch((e) => console.warn('Orphan sweep failed:', e));
+    // Refresh the Pro entitlement in the background (works offline from cache).
+    void initPurchases();
+    void excludeModelsFromBackup();
+    if (peekSettings().onboardingCompleted) prefetchSpeechModel();
   });
-  // Settings gate the first screen (onboarding) and haptics, so they load
-  // before the splash screen hides.
+}
+
+export default function RootLayout() {
+  // The icon font is the only one the app draws with; loading it before the
+  // splash hides avoids a first frame of empty icon boxes.
+  const [fontsLoaded, error] = useFonts(Ionicons.font);
+  // Settings gate the first screen (onboarding), the interface language and
+  // haptics, so they load before the splash screen hides.
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   useEffect(() => {
+    let unsubscribe = () => {};
     getSettings().finally(() => {
+      applyLanguagePreference(peekSettings().appLanguage);
+      // Takes effect on the next launch; the language screen tells the user.
+      syncLayoutDirection();
+      unsubscribe = subscribeSettings((settings) => applyLanguagePreference(settings.appLanguage));
       setSettingsLoaded(true);
-      // Resume AI work a previous session left unfinished.
-      void enhanceQueue.start();
-      // Export files are only needed until shared; don't let them pile up.
-      clearExports();
-      // Files a killed app left behind (e.g. during a delete's undo window).
-      void sweepOrphanFiles(Date.now()).catch((e) => console.warn('Orphan sweep failed:', e));
-      // Refresh the Pro entitlement in the background (works offline from cache).
-      void initPurchases();
+      runAfterLaunch();
     });
+    return () => unsubscribe();
   }, []);
-  const loaded = fontsLoaded && settingsLoaded;
+  const loaded = (fontsLoaded || Boolean(error)) && settingsLoaded;
 
-  // Expo Router uses Error Boundaries to catch errors in the navigation tree.
   useEffect(() => {
-    if (error) throw error;
+    // A missing icon font is cosmetic; never keep the app behind the splash for it.
+    if (error) console.warn('Icon font failed to load:', error);
   }, [error]);
 
   useEffect(() => {
@@ -85,6 +105,8 @@ function RootLayoutNav() {
   const colors = Colors[colorScheme ?? 'light'];
   const router = useRouter();
   const navigationState = useRootNavigationState();
+  // Pushed screens enter from the trailing edge, which is the left in RTL.
+  const push = I18nManager.isRTL ? 'slide_from_left' : 'slide_from_right';
 
   // First launch: show onboarding once the navigator is mounted. Settings
   // are already loaded (RootLayout waits for them before rendering this).
@@ -111,16 +133,18 @@ function RootLayoutNav() {
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
               <Stack.Screen
                 name="note/[id]"
-                options={{ headerShown: false, gestureEnabled: true, animation: 'slide_from_right', fullScreenGestureEnabled: true }}
+                options={{ headerShown: false, gestureEnabled: true, animation: push, fullScreenGestureEnabled: true }}
               />
+              <Stack.Screen name="ask/[id]" options={{ headerShown: false, presentation: 'modal' }} />
               <Stack.Screen name="paywall" options={{ headerShown: false, presentation: 'modal' }} />
               <Stack.Screen name="import" options={{ headerShown: false, presentation: 'modal' }} />
+              <Stack.Screen name="language" options={{ headerShown: false, presentation: 'modal' }} />
               <Stack.Screen
                 name="onboarding"
                 options={{ headerShown: false, presentation: 'fullScreenModal', gestureEnabled: false, animation: 'fade' }}
               />
-              <Stack.Screen name="legal/[doc]" options={{ headerShown: false, animation: 'slide_from_right' }} />
-              <Stack.Screen name="models" options={{ headerShown: false, animation: 'slide_from_right' }} />
+              <Stack.Screen name="legal/[doc]" options={{ headerShown: false, animation: push }} />
+              <Stack.Screen name="models" options={{ headerShown: false, animation: push }} />
             </Stack>
           </ActionSheetProvider>
         </ToastProvider>

@@ -22,6 +22,7 @@ import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { FontSize, Spacing } from '@/constants/Spacing';
 import { Radius } from '@/constants/theme';
+import { useI18n } from '@/i18n';
 import { haptic } from '@/services/haptics';
 
 export interface SheetAction {
@@ -54,6 +55,7 @@ export function ActionSheetProvider({ children }: { children: React.ReactNode })
   const [sheet, setSheet] = useState<SheetOptions | null>(null);
   const colors = Colors[useColorScheme() ?? 'light'];
   const insets = useSafeAreaInsets();
+  const { t } = useI18n();
   const dragY = useSharedValue(0);
 
   const close = useCallback(() => setSheet(null), []);
@@ -88,7 +90,7 @@ export function ActionSheetProvider({ children }: { children: React.ReactNode })
         <GestureHandlerRootView style={{ flex: 1 }}>
           {sheet && (
             <Animated.View entering={FadeIn.duration(160)} exiting={FadeOut.duration(160)} style={styles.backdrop}>
-              <Pressable style={StyleSheet.absoluteFill} onPress={close} accessibilityLabel="Close menu" />
+              <Pressable style={StyleSheet.absoluteFill} onPress={close} accessibilityLabel={t('common.close')} />
             </Animated.View>
           )}
           {sheet && (

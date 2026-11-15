@@ -5,7 +5,8 @@
  * (services/db/notesRepo.ts) is the only thing that talks to the database.
  */
 
-import type { EnhancementState, Note, NoteSummary } from '../../types';
+import type { EnhancementState, Note, NoteListItem, NoteSummary } from '../../types';
+import { countWords } from '../text';
 
 export interface NoteRow {
   id: string;
@@ -24,6 +25,8 @@ export interface NoteRow {
   enhancement_progress: number;
   title_is_auto: number;
   content_hash: string | null;
+  /** Derived from `transcription` on every write; read by lists and statistics. */
+  word_count: number;
 }
 
 /** Column order shared by INSERT statements. */
@@ -44,6 +47,7 @@ export const NOTE_COLUMNS: (keyof NoteRow)[] = [
   'enhancement_progress',
   'title_is_auto',
   'content_hash',
+  'word_count',
 ];
 
 const ENHANCEMENT_STATES: EnhancementState[] = ['none', 'pending', 'running', 'done', 'failed'];
@@ -76,6 +80,7 @@ function parseSummary(text: string | null): NoteSummary | null {
     decisions: stringArray(raw.decisions),
     model: typeof raw.model === 'string' ? raw.model : '',
     generatedAt: typeof raw.generatedAt === 'string' ? raw.generatedAt : '',
+    ...(typeof raw.style === 'string' ? { style: raw.style } : {}),
   };
 }
 
@@ -156,6 +161,52 @@ export function noteToRow(note: Note): NoteRow {
     enhancement_progress: note.enhancementProgress,
     title_is_auto: note.titleIsAuto ? 1 : 0,
     content_hash: note.contentHash,
+    word_count: countWords(note.transcription),
+  };
+}
+
+/** Columns for the notes list: everything it shows, and no full texts. */
+export const LIST_COLUMNS = `
+  id, title, duration, tags_json, pinned, created_at, language, source, enhancement, word_count,
+  audio_uri IS NOT NULL AS has_audio,
+  summary_json IS NOT NULL AS has_summary,
+  substr(transcription, 1, 280) AS snippet,
+  CASE WHEN json_valid(summary_json) THEN substr(json_extract(summary_json, '$.overview'), 1, 280) END AS summary_snippet`;
+
+export interface NoteListRow {
+  id: string;
+  title: string;
+  duration: number;
+  tags_json: string;
+  pinned: number;
+  created_at: string;
+  language: string | null;
+  source: string;
+  enhancement: string;
+  word_count: number;
+  has_audio: number;
+  has_summary: number;
+  snippet: string | null;
+  summary_snippet: string | null;
+}
+
+export function rowToListItem(row: NoteListRow): NoteListItem {
+  return {
+    id: row.id,
+    title: row.title,
+    snippet: (row.summary_snippet || row.snippet || '').replace(/\s+/g, ' ').trim(),
+    hasSummary: row.has_summary === 1,
+    hasAudio: row.has_audio === 1,
+    duration: row.duration,
+    tags: stringArray(parseJson<unknown>(row.tags_json, [])),
+    pinned: row.pinned === 1,
+    createdAt: validDate(row.created_at, new Date()),
+    language: row.language,
+    source: row.source === 'import' ? 'import' : 'recording',
+    enhancement: ENHANCEMENT_STATES.includes(row.enhancement as EnhancementState)
+      ? (row.enhancement as EnhancementState)
+      : 'none',
+    wordCount: row.word_count,
   };
 }
 
@@ -178,6 +229,10 @@ export function buildUpdate(
     if (!mapped) continue;
     sets.push(`${mapped[0]} = ?`);
     params.push(mapped[1] as string | number | null);
+    if (key === 'transcription') {
+      sets.push('word_count = ?');
+      params.push(countWords(String(patch.transcription ?? '')));
+    }
   }
 
   sets.push('updated_at = ?');

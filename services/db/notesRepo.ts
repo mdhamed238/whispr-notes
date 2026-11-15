@@ -14,15 +14,28 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Directory, File, Paths } from 'expo-file-system';
-import type { Note, NoteSort } from '../../types';
+import type { Note, NoteListItem, NoteSort } from '../../types';
+import { countWords } from '../text';
 import { deleteTimeline } from '../timelineStore';
 import { getDb } from './database';
 import { restoredEnhancement } from '../ai/jobState';
 import { orphanedFiles } from './orphans';
-import { NOTE_COLUMNS, NoteRow, buildUpdate, normalizeLegacy, noteToRow, rowToNote, toFtsQuery } from './mapping';
+import {
+  LIST_COLUMNS,
+  NOTE_COLUMNS,
+  NoteListRow,
+  NoteRow,
+  buildUpdate,
+  normalizeLegacy,
+  noteToRow,
+  rowToListItem,
+  rowToNote,
+  toFtsQuery,
+} from './mapping';
 
 const LEGACY_KEY = 'transcriptions';
 const LEGACY_FLAG = 'legacy_migrated';
+const WORD_COUNT_FLAG = 'word_count_backfilled';
 
 type Listener = (changedId: string | null) => void;
 const listeners = new Set<Listener>();
@@ -46,15 +59,46 @@ export function subscribe(listener: Listener): () => void {
 
 let readyPromise: Promise<void> | null = null;
 
-/** Opens the DB and runs the one-time AsyncStorage import. */
+/** Opens the DB and runs the one-time data migrations. */
 function ready(): Promise<void> {
   if (!readyPromise) {
-    readyPromise = migrateLegacy().catch((error) => {
-      readyPromise = null;
-      throw error;
-    });
+    readyPromise = migrateLegacy()
+      .then(backfillWordCounts)
+      .catch((error) => {
+        readyPromise = null;
+        throw error;
+      });
   }
   return readyPromise;
+}
+
+/**
+ * Notes saved before the word_count column existed have 0 in it. Counted
+ * once, a batch at a time so a large library never holds every transcript
+ * in memory together.
+ */
+async function backfillWordCounts(): Promise<void> {
+  const db = await getDb();
+  const flag = await db.getFirstAsync<{ value: string }>('SELECT value FROM meta WHERE key = ?', WORD_COUNT_FLAG);
+  if (flag) return;
+  for (;;) {
+    const rows = await db.getAllAsync<{ id: string; transcription: string }>(
+      "SELECT id, transcription FROM notes WHERE word_count = 0 AND transcription != '' LIMIT 50"
+    );
+    if (rows.length === 0) break;
+    let progressed = false;
+    await db.withExclusiveTransactionAsync(async (txn) => {
+      for (const row of rows) {
+        // -1 marks "counted, and there are no words", so the loop can't spin on it.
+        const count = countWords(row.transcription) || -1;
+        await txn.runAsync('UPDATE notes SET word_count = ? WHERE id = ?', count, row.id);
+        progressed = true;
+      }
+    });
+    if (!progressed) break;
+  }
+  await db.runAsync('UPDATE notes SET word_count = 0 WHERE word_count < 0');
+  await db.runAsync('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', WORD_COUNT_FLAG, new Date().toISOString());
 }
 
 async function migrateLegacy(): Promise<void> {
@@ -95,11 +139,13 @@ const ORDER_BY: Record<NoteSort, string> = {
   title: 'notes.pinned DESC, notes.title COLLATE NOCASE ASC',
 };
 
-export async function listNotes(
-  opts: { query?: string; tag?: string | null; sort?: NoteSort } = {}
-): Promise<Note[]> {
-  await ready();
-  const db = await getDb();
+interface ListOptions {
+  query?: string;
+  tag?: string | null;
+  sort?: NoteSort;
+}
+
+function listQuery(columns: string, opts: ListOptions): { sql: string; params: (string | number)[] } {
   const where: string[] = [];
   const params: (string | number)[] = [];
 
@@ -114,12 +160,35 @@ export async function listNotes(
   }
 
   const sql =
-    'SELECT * FROM notes' +
+    `SELECT ${columns} FROM notes` +
     (where.length ? ` WHERE ${where.join(' AND ')}` : '') +
     ` ORDER BY ${ORDER_BY[opts.sort ?? 'newest']}`;
+  return { sql, params };
+}
 
+/** Full notes, transcripts included. For backup and export; lists use `listNoteItems`. */
+export async function listNotes(opts: ListOptions = {}): Promise<Note[]> {
+  await ready();
+  const db = await getDb();
+  const { sql, params } = listQuery('*', opts);
   const rows = await db.getAllAsync<NoteRow>(sql, params);
   return rows.map(rowToNote);
+}
+
+/** What the notes list and statistics need, without loading any full transcript. */
+export async function listNoteItems(opts: ListOptions = {}): Promise<NoteListItem[]> {
+  await ready();
+  const db = await getDb();
+  const { sql, params } = listQuery(LIST_COLUMNS, opts);
+  const rows = await db.getAllAsync<NoteListRow>(sql, params);
+  return rows.map(rowToListItem);
+}
+
+export async function countNotes(): Promise<number> {
+  await ready();
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM notes');
+  return row?.n ?? 0;
 }
 
 export async function getNote(id: string): Promise<Note | null> {

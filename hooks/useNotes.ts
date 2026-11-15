@@ -6,13 +6,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import * as notesRepo from '@/services/db/notesRepo';
-import type { Note, NoteSort } from '@/types';
+import type { NoteListItem, NoteSort } from '@/types';
 
 const QUERY_DEBOUNCE_MS = 150;
 const CHANGE_DEBOUNCE_MS = 50;
 
 export function useNotes(opts: { query: string; tag: string | null; sort: NoteSort }) {
-  const [notes, setNotes] = useState<Note[]>([]);
+  const [notes, setNotes] = useState<NoteListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const optsRef = useRef(opts);
@@ -22,7 +22,8 @@ export function useNotes(opts: { query: string; tag: string | null; sort: NoteSo
   const refresh = useCallback(async () => {
     const id = ++requestId.current;
     try {
-      const next = await notesRepo.listNotes(optsRef.current);
+      // List rows only: snippets, never whole transcripts.
+      const next = await notesRepo.listNoteItems(optsRef.current);
       // Drop out-of-order results from an older, slower query.
       if (id === requestId.current) {
         setNotes(next);

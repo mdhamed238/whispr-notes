@@ -1,6 +1,6 @@
 # Terms of Use
 
-**Effective date:** November 13, 2026
+**Effective date:** November 15, 2026
 
 These terms are an agreement between you and Mohamed Hamed, the independent developer of WhisprNotes ("I", "me"). By using the app you agree to them.
 
@@ -18,7 +18,7 @@ You own your recordings, transcripts and notes. They are stored on your device a
 
 ## AI features
 
-Transcripts, titles and summaries are produced automatically by AI models running on your phone. They can contain mistakes or miss details. Check anything important against the original recording before relying on it, especially for legal, medical, financial or other high-stakes decisions.
+Transcripts, titles, summaries and answers to questions about your notes are produced automatically by AI models running on your phone. They can contain mistakes or miss details. Check anything important against the original recording before relying on it, especially for legal, medical, financial or other high-stakes decisions.
 
 ## WhisprNotes Pro
 
@@ -27,7 +27,7 @@ Transcripts, titles and summaries are produced automatically by AI models runnin
 - You can restore a lifetime purchase using the same App Store or Google Play account.
 - If you previously bought a subscription, its existing store terms still apply. You can manage or cancel it in your store account settings; your existing Pro entitlement remains valid while active.
 - Refunds are handled by Apple or Google under their policies.
-- The free version includes a limited number of AI summaries per week; that limit may change.
+- The free version includes a limited number of AI summaries per week and a shorter maximum recording length; those limits, and which features are part of Pro, may change. Features you have paid for are not removed.
 
 ## Acceptable use
 

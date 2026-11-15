@@ -6,12 +6,19 @@ import JSZip from 'jszip';
 
 import * as notesRepo from '../db/notesRepo';
 import { loadTimeline } from '../timelineStore';
-import { exportDirectory, shareFile, writeExportFile } from './exporter';
+import { exportDirectory, exportLabels, shareFile, writeExportFile } from './exporter';
 import { slugify, toMarkdown } from './generators';
+
+export class NothingToBackUpError extends Error {
+  constructor() {
+    super('There are no notes to back up');
+  }
+}
 
 export async function backupAllNotes(): Promise<number> {
   const notes = await notesRepo.listNotes({ sort: 'oldest' });
-  if (notes.length === 0) throw new Error('There are no notes to back up');
+  if (notes.length === 0) throw new NothingToBackUpError();
+  const labels = exportLabels();
 
   const zip = new JSZip();
   const used = new Set<string>();
@@ -20,7 +27,7 @@ export async function backupAllNotes(): Promise<number> {
     for (let n = 2; used.has(name); n++) name = `${name}-${n}`;
     used.add(name);
     const segments = await loadTimeline(note.id);
-    zip.file(`${name}.md`, toMarkdown(note, { scope: 'full', segments, timestamps: Boolean(segments) }));
+    zip.file(`${name}.md`, toMarkdown(note, { scope: 'full', segments, timestamps: Boolean(segments), labels }));
   }
 
   exportDirectory();

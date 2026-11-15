@@ -16,6 +16,7 @@ import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { FontSize, Spacing } from '@/constants/Spacing';
 import { Radius } from '@/constants/theme';
+import { useI18n, type TKey } from '@/i18n';
 import { exportAndShare, type ExportFormat } from '@/services/export/exporter';
 import type { ExportScope } from '@/services/export/generators';
 import { haptic } from '@/services/haptics';
@@ -23,12 +24,13 @@ import type { Note } from '@/types';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
-const FORMATS: { format: ExportFormat; label: string; hint: string; icon: IconName; pro: boolean }[] = [
-  { format: 'pdf', label: 'PDF', hint: 'Branded, ready to send', icon: 'document-outline', pro: true },
-  { format: 'md', label: 'Markdown', hint: 'Notion, Obsidian, docs', icon: 'logo-markdown', pro: true },
-  { format: 'txt', label: 'Text', hint: 'Email or chat', icon: 'document-text-outline', pro: false },
-  { format: 'srt', label: 'Subtitles', hint: '.srt with timings', icon: 'film-outline', pro: true },
-  { format: 'audio', label: 'Audio', hint: 'Original recording', icon: 'musical-notes-outline', pro: true },
+// Text and Markdown are free: a note should never be stuck in the app.
+const FORMATS: { format: ExportFormat; label: TKey; hint: TKey; icon: IconName; pro: boolean }[] = [
+  { format: 'txt', label: 'export.format.text', hint: 'export.hint.text', icon: 'document-text-outline', pro: false },
+  { format: 'md', label: 'export.format.markdown', hint: 'export.hint.markdown', icon: 'logo-markdown', pro: false },
+  { format: 'pdf', label: 'export.format.pdf', hint: 'export.hint.pdf', icon: 'document-outline', pro: true },
+  { format: 'srt', label: 'export.format.subtitles', hint: 'export.hint.subtitles', icon: 'film-outline', pro: true },
+  { format: 'audio', label: 'export.format.audio', hint: 'export.hint.audio', icon: 'musical-notes-outline', pro: true },
 ];
 
 export function ExportPanel({ note, isPro, hasTimeline }: { note: Note; isPro: boolean; hasTimeline: boolean }) {
@@ -36,6 +38,7 @@ export function ExportPanel({ note, isPro, hasTimeline }: { note: Note; isPro: b
   const sheet = useActionSheet();
   const toast = useToast();
   const router = useRouter();
+  const { t } = useI18n();
   const [scope, setScope] = useState<ExportScope>('full');
   const [timestamps, setTimestamps] = useState(false);
   const [busy, setBusy] = useState<ExportFormat | null>(null);
@@ -54,7 +57,7 @@ export function ExportPanel({ note, isPro, hasTimeline }: { note: Note; isPro: b
       sheet.close();
     } catch (error) {
       console.error('Export failed:', error);
-      toast.show({ message: error instanceof Error ? error.message : 'Export failed.', tone: 'error' });
+      toast.show({ message: t('export.failed'), tone: 'error' });
     } finally {
       setBusy(null);
     }
@@ -67,8 +70,8 @@ export function ExportPanel({ note, isPro, hasTimeline }: { note: Note; isPro: b
       {note.summary && (
         <SegmentedControl
           options={[
-            { value: 'full', label: 'Summary + transcript' },
-            { value: 'summary', label: 'Summary only' },
+            { value: 'full', label: t('export.scopeFull') },
+            { value: 'summary', label: t('export.scopeSummary') },
           ]}
           value={scope}
           onChange={setScope}
@@ -86,7 +89,7 @@ export function ExportPanel({ note, isPro, hasTimeline }: { note: Note; isPro: b
               onPress={() => run(f.format, locked)}
               style={[styles.tile, { backgroundColor: colors.surface }]}
               accessibilityRole="button"
-              accessibilityLabel={`${f.label}${locked ? ', requires Pro' : ''}`}
+              accessibilityLabel={locked ? t('export.lockedA11y', { format: t(f.label) }) : t(f.label)}
             >
               <View style={styles.tileTop}>
                 {busy === f.format ? (
@@ -96,9 +99,11 @@ export function ExportPanel({ note, isPro, hasTimeline }: { note: Note; isPro: b
                 )}
                 {locked && <Ionicons name="lock-closed" size={13} color={colors.textMuted} />}
               </View>
-              <Text style={[styles.tileLabel, { color: colors.text }]}>{f.label}</Text>
-              <Text style={[styles.tileHint, { color: colors.textMuted }]} numberOfLines={1}>
-                {f.hint}
+              <Text style={[styles.tileLabel, { color: colors.text }]} numberOfLines={1}>
+                {t(f.label)}
+              </Text>
+              <Text style={[styles.tileHint, { color: colors.textMuted }]} numberOfLines={2}>
+                {t(f.hint)}
               </Text>
             </AnimatedPressable>
           );
@@ -107,7 +112,7 @@ export function ExportPanel({ note, isPro, hasTimeline }: { note: Note; isPro: b
 
       {hasTimeline && (
         <View style={styles.toggleRow}>
-          <Text style={[styles.toggleLabel, { color: colors.text }]}>Include timestamps</Text>
+          <Text style={[styles.toggleLabel, { color: colors.text }]}>{t('export.timestamps')}</Text>
           <Switch
             value={timestamps}
             onValueChange={(v) => {
@@ -115,6 +120,7 @@ export function ExportPanel({ note, isPro, hasTimeline }: { note: Note; isPro: b
               setTimestamps(v);
             }}
             trackColor={{ true: colors.tint, false: colors.border }}
+            accessibilityLabel={t('export.timestamps')}
           />
         </View>
       )}

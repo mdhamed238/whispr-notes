@@ -11,6 +11,10 @@ export interface EngineResult {
 export interface TranscribeOptions {
   /** 'auto' or an ISO-639-1 code. */
   language: string;
+  /** With 'auto': the language most likely being spoken (the app's). */
+  languageHint?: string;
+  /** Retrying after a crash: prefer the most conservative decoding. */
+  safeMode?: boolean;
   /** 0..1, or -1 when the engine can't report progress. */
   onProgress: (fraction: number) => void;
   signal: AbortSignal;

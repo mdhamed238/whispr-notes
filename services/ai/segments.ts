@@ -1,9 +1,10 @@
 /**
- * Turns per-word timings into readable, subtitle-sized segments. Pure.
+ * Turns whisper.cpp output into readable, subtitle-sized segments. Pure.
  */
 import type { TranscriptSegment, TranscriptWord } from '../../types';
+import { SENTENCE_END_CHARS } from '../text';
 
-const SENTENCE_END = /[.!?…]["')\]]*$/;
+const SENTENCE_END = new RegExp(`[${SENTENCE_END_CHARS}]["')\\]」』»”]*$`);
 
 export function groupWordsIntoSegments(
   words: TranscriptWord[],
@@ -34,6 +35,9 @@ export function groupWordsIntoSegments(
   return segments;
 }
 
+// [_BEG_], [_TT_42], [BLANK_AUDIO]: whisper.cpp's markers, never speech.
+const SPECIAL_TOKEN = /^\[_?[A-Z_]+(?:\d+)?_?\]$/;
+
 /**
  * whisper.cpp reports t0/t1 in centiseconds. With one-token segments
  * (maxLen 1) it emits sub-word pieces: a piece that doesn't start with
@@ -43,7 +47,7 @@ export function groupWordsIntoSegments(
 export function wordsFromWhisperCpp(segments: { text: string; t0: number; t1: number }[]): TranscriptWord[] {
   const words: TranscriptWord[] = [];
   for (const s of segments) {
-    if (s.text.trim().length === 0 || /^\[_?[A-Z_]+_?\]$/.test(s.text.trim())) continue;
+    if (s.text.trim().length === 0 || SPECIAL_TOKEN.test(s.text.trim())) continue;
     const previous = words[words.length - 1];
     if (previous && !/^\s/.test(s.text)) {
       previous.word += s.text;
@@ -53,4 +57,40 @@ export function wordsFromWhisperCpp(segments: { text: string; t0: number; t1: nu
     }
   }
   return words;
+}
+
+/**
+ * whisper.cpp's own phrase-level segments, used for scripts where
+ * token-level output is unsafe (see `hasBrokenText`) or meaningless (no
+ * spaces between words). Each phrase is one seek target; there are no
+ * per-word timings.
+ */
+export function segmentsFromWhisperPhrases(segments: { text: string; t0: number; t1: number }[]): TranscriptSegment[] {
+  const out: TranscriptSegment[] = [];
+  for (const s of segments) {
+    const text = s.text.trim();
+    if (!text || SPECIAL_TOKEN.test(text)) continue;
+    const start = s.t0 / 100;
+    out.push({ start, end: Math.max(s.t1 / 100, start), text });
+  }
+  return out;
+}
+
+/** Joins phrase texts, with spaces only where the script uses them. */
+export function joinPhrases(segments: TranscriptSegment[], unspaced: boolean): string {
+  return segments
+    .map((s) => s.text)
+    .join(unspaced ? '' : ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Whisper tokens are byte sequences, so a one-token segment can end in the
+ * middle of a multi-byte character. Decoded on its own, that half shows up
+ * as U+FFFD. When any piece carries one, the token-level pass can't be
+ * trusted and the caller re-runs at phrase level.
+ */
+export function hasBrokenText(segments: { text: string }[]): boolean {
+  return segments.some((s) => s.text.includes('�'));
 }

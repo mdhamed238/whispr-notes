@@ -68,3 +68,48 @@ describe('review fixes', () => {
     expect(resolveTier({ totalMemoryBytes: 6.6 * GiB, abis: ['arm64-v8a'], platform: 'android' })).toBe('flagship');
   });
 });
+
+describe('multilingual engine choice', () => {
+  const { baseEngineFor, fallbackEngine, handlesLongAudio } = require('../../services/ai/tiers');
+  const base = { tier: 'flagship' as const, isPro: true, override: null, failedEngines: [] as string[] };
+
+  test('free users get the multilingual Base model for any language but English', () => {
+    expect(chooseEngine({ ...base, isPro: false, language: 'fr' })).toBe('whisper-base');
+    expect(chooseEngine({ ...base, isPro: false, language: 'ar' })).toBe('whisper-base');
+    expect(chooseEngine({ ...base, isPro: false, language: 'en' })).toBe('whisper-base-en');
+  });
+
+  test('Pro on a lite phone still gets its language', () => {
+    expect(chooseEngine({ ...base, tier: 'lite', language: 'ja' })).toBe('whisper-base');
+  });
+
+  test('Pro keeps the larger models whatever the language', () => {
+    expect(chooseEngine({ ...base, language: 'de' })).toBe('whisper-large-v3-turbo');
+    expect(chooseEngine({ ...base, tier: 'standard', language: 'de' })).toBe('whisper-small');
+  });
+
+  test('fallbacks never land on the English-only model for another language', () => {
+    expect(chooseEngine({ ...base, language: 'es', failedEngines: ['whisper-large-v3-turbo', 'whisper-small'] })).toBe('whisper-base');
+    expect(fallbackEngine('whisper-base', 'es')).toBeNull();
+    expect(baseEngineFor('es')).toBe('whisper-base');
+  });
+
+  test('English can fall through to the multilingual model on the other runtime', () => {
+    expect(fallbackEngine('whisper-base-en', 'en')).toBe('whisper-base');
+    expect(
+      chooseEngine({ ...base, failedEngines: ['whisper-large-v3-turbo', 'whisper-small', 'whisper-base-en'] })
+    ).toBe('whisper-base');
+  });
+
+  test('a chain where everything failed stops on the last engine instead of looping', () => {
+    const all = ['whisper-large-v3-turbo', 'whisper-small', 'whisper-base-en', 'whisper-base'];
+    expect(chooseEngine({ ...base, failedEngines: all })).toBe('whisper-base');
+  });
+
+  test('only the whisper.cpp engines take recordings of any length', () => {
+    expect(handlesLongAudio('whisper-large-v3-turbo')).toBe(true);
+    expect(handlesLongAudio('whisper-base')).toBe(true);
+    expect(handlesLongAudio('whisper-small')).toBe(false);
+    expect(handlesLongAudio('whisper-base-en')).toBe(false);
+  });
+});

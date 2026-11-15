@@ -59,6 +59,12 @@ function buildWavHeader(dataLength: number, sampleRate: number): Uint8Array {
 export interface WavCaptureResult {
   uri: string;
   durationSeconds: number;
+  /**
+   * Loudest sample of each chunk written, 0..1. Collected for free while
+   * converting samples, so the note's waveform never needs a second pass
+   * over the recording.
+   */
+  chunkPeaks: number[];
 }
 
 export class WavFileWriter {
@@ -71,6 +77,7 @@ export class WavFileWriter {
   // allocated once and reused for every write instead of per chunk.
   private scratch: Uint8Array | null = null;
   private scratchView: DataView | null = null;
+  private chunkPeaks: number[] = [];
 
   private constructor(file: File, handle: FileHandle, sampleRate: number) {
     this.file = file;
@@ -113,14 +120,18 @@ export class WavFileWriter {
     }
 
     const view = this.scratchView!;
+    let peak = 0;
     for (let i = 0; i < samples.length; i++) {
       const clamped = Math.max(-1, Math.min(1, samples[i]));
       const value = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
       view.setInt16(i * BYTES_PER_SAMPLE, value, true);
+      const level = clamped < 0 ? -clamped : clamped;
+      if (level > peak) peak = level;
     }
 
     this.handle.writeBytes(this.scratch);
     this.pcmByteLength += byteLength;
+    this.chunkPeaks.push(peak);
   }
 
   /**
@@ -149,6 +160,7 @@ export class WavFileWriter {
       return {
         uri: this.file.uri,
         durationSeconds: this.durationSeconds,
+        chunkPeaks: this.chunkPeaks,
       };
     } catch (error) {
       console.error('Failed to finalize WAV file:', error);

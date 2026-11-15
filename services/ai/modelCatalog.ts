@@ -9,7 +9,6 @@ export type ModelId = EngineId | LlmId;
 export interface ModelInfo {
   id: ModelId;
   name: string;
-  purpose: string;
   approxBytes: number;
   /** 'manual': downloaded by modelManager; 'library': fetched by ExecuTorch on first use. */
   delivery: 'manual' | 'library';
@@ -22,8 +21,7 @@ export const MODEL_CATALOG: Record<ModelId, ModelInfo> = {
   'whisper-large-v3-turbo': {
     id: 'whisper-large-v3-turbo',
     name: 'Whisper Large-v3 Turbo',
-    purpose: 'Most accurate transcripts, 99 languages',
-    approxBytes: 574_000_000,
+    approxBytes: 574_041_195,
     delivery: 'manual',
     url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin',
     fileName: 'ggml-large-v3-turbo-q5_0.bin',
@@ -32,15 +30,23 @@ export const MODEL_CATALOG: Record<ModelId, ModelInfo> = {
   'whisper-small': {
     id: 'whisper-small',
     name: 'Whisper Small',
-    purpose: 'Accurate transcripts, multilingual',
     approxBytes: 490_000_000,
     delivery: 'library',
     pro: true,
   },
+  'whisper-base': {
+    id: 'whisper-base',
+    name: 'Whisper Base (multilingual)',
+    // q5_1: a fifth of the full-precision file for a small accuracy cost.
+    approxBytes: 59_707_625,
+    delivery: 'manual',
+    url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin',
+    fileName: 'ggml-base-q5_1.bin',
+    pro: false,
+  },
   'whisper-base-en': {
     id: 'whisper-base-en',
     name: 'Whisper Base (English)',
-    purpose: 'Live transcript while you speak',
     approxBytes: 150_000_000,
     delivery: 'library',
     pro: false,
@@ -48,7 +54,6 @@ export const MODEL_CATALOG: Record<ModelId, ModelInfo> = {
   'qwen3-1.7b': {
     id: 'qwen3-1.7b',
     name: 'Qwen3 1.7B',
-    purpose: 'Summaries and titles',
     approxBytes: 1_200_000_000,
     delivery: 'library',
     pro: false,
@@ -56,7 +61,6 @@ export const MODEL_CATALOG: Record<ModelId, ModelInfo> = {
   'qwen3-0.6b': {
     id: 'qwen3-0.6b',
     name: 'Qwen3 0.6B',
-    purpose: 'Summaries and titles',
     approxBytes: 500_000_000,
     delivery: 'library',
     pro: false,
@@ -68,3 +72,8 @@ export function formatBytes(bytes: number): string {
   if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`;
   return `${Math.max(1, Math.round(bytes / 1e3))} KB`;
 }
+
+/** Models WhisprNotes downloads and stores itself (whisper.cpp weights). */
+export const MANUAL_MODELS = (Object.keys(MODEL_CATALOG) as ModelId[]).filter(
+  (id) => MODEL_CATALOG[id].delivery === 'manual'
+);

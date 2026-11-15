@@ -1,10 +1,13 @@
 /**
  * Insights: what you've captured, when, and how much typing it saved.
  * Computed on this phone from your notes; nothing is sent anywhere.
+ *
+ * Everyone sees totals, the streak and the last two weeks. Pro adds the
+ * habit analysis: time saved, pace, when and on which days you record, tags.
  */
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,15 +23,26 @@ import Colors from '@/constants/Colors';
 import { FontSize, Spacing } from '@/constants/Spacing';
 import { Radius, Shadow } from '@/constants/theme';
 import { usePro } from '@/hooks/usePro';
+import { formatDate, formatNumber, getLocaleTag, useI18n } from '@/i18n';
 import * as notesRepo from '@/services/db/notesRepo';
 import { haptic } from '@/services/haptics';
 import { computeInsights, type Insights } from '@/services/insights/stats';
 
-const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+/** Changes arrive in bursts (an import, a summary landing); recompute once they settle. */
+const RELOAD_DEBOUNCE_MS = 300;
 
 function formatMinutes(m: number): string {
-  if (m < 60) return `${Math.round(m)}`;
-  return `${(m / 60).toFixed(m < 600 ? 1 : 0)}`;
+  if (m < 60) return formatNumber(Math.round(m));
+  return formatNumber(Math.round((m / 60) * (m < 600 ? 10 : 1)) / (m < 600 ? 10 : 1));
+}
+
+function formatHour(hour: number): string {
+  const date = new Date(2000, 0, 1, hour);
+  try {
+    return date.toLocaleTimeString(getLocaleTag(), { hour: 'numeric' });
+  } catch {
+    return `${hour}:00`;
+  }
 }
 
 export default function InsightsScreen() {
@@ -36,23 +50,50 @@ export default function InsightsScreen() {
   const colors = Colors[colorScheme ?? 'light'];
   const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
+  const { t, tp, language } = useI18n();
   const { isPro } = usePro();
   const [insights, setInsights] = useState<Insights | null>(null);
 
+  // Tabs stay mounted, so this screen would otherwise recompute on every
+  // write anywhere in the app. It reloads only while visible, and only when
+  // something changed since it last did.
+  const stale = useRef(true);
+  const focused = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const load = useCallback(() => {
+    stale.current = false;
+    notesRepo
+      .listNoteItems()
+      .then((notes) => setInsights(computeInsights(notes, new Date())))
+      .catch((e) => {
+        stale.current = true;
+        console.warn('Insights failed:', e);
+      });
+  }, []);
+
   useEffect(() => {
-    let cancelled = false;
-    const load = () =>
-      notesRepo
-        .listNotes()
-        .then((notes) => !cancelled && setInsights(computeInsights(notes, new Date())))
-        .catch((e) => console.warn('Insights failed:', e));
-    load();
-    const unsubscribe = notesRepo.subscribe(() => load());
+    const unsubscribe = notesRepo.subscribe(() => {
+      stale.current = true;
+      if (!focused.current) return;
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(load, RELOAD_DEBOUNCE_MS);
+    });
     return () => {
-      cancelled = true;
+      if (timer.current) clearTimeout(timer.current);
       unsubscribe();
     };
-  }, []);
+  }, [load]);
+
+  useFocusEffect(
+    useCallback(() => {
+      focused.current = true;
+      if (stale.current) load();
+      return () => {
+        focused.current = false;
+      };
+    }, [load])
+  );
 
   const bars = useMemo(
     () =>
@@ -61,25 +102,39 @@ export default function InsightsScreen() {
         return {
           key: d.date,
           value: d.minutes,
-          label: WEEKDAYS[date.getDay()],
-          detail: date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+          label: formatDate(date, { weekday: 'narrow' }),
+          detail: formatDate(date, { weekday: 'short', month: 'short', day: 'numeric' }),
         };
       }),
-    [insights]
+    // `language` re-labels the days when the interface language changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [insights, language]
+  );
+
+  const weekdayBars = useMemo(
+    () =>
+      (insights?.byWeekday ?? []).map((count, day) => {
+        // 2 Jan 2000 was a Sunday.
+        const date = new Date(2000, 0, 2 + day, 12);
+        return {
+          key: String(day),
+          value: count,
+          label: formatDate(date, { weekday: 'narrow' }),
+          detail: formatDate(date, { weekday: 'long' }),
+        };
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [insights, language]
   );
 
   if (insights && insights.totalNotes === 0) {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
         <View style={styles.headerPad}>
-          <ScreenHeader title="Insights" />
+          <ScreenHeader title={t('insights.title')} />
         </View>
-        <EmptyState
-          icon="stats-chart-outline"
-          title="Your insights start here"
-          subtitle="Record a few notes and see your streaks, busiest hours and time saved."
-        >
-          <Button label="Record a note" icon="mic" onPress={() => router.navigate('/')} />
+        <EmptyState icon="stats-chart-outline" title={t('insights.emptyTitle')} subtitle={t('insights.emptyBody')}>
+          <Button label={t('notes.recordNote')} icon="mic" onPress={() => router.navigate('/')} />
         </EmptyState>
       </SafeAreaView>
     );
@@ -87,77 +142,122 @@ export default function InsightsScreen() {
 
   const i = insights;
   const hours = i ? i.totalMinutes >= 60 : false;
+  const locked = !isPro;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle={colorScheme === 'dark' ? 'light-content' : 'dark-content'} />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <ScreenHeader title="Insights" subtitle="Calculated on this phone. Never sent anywhere." />
+        <ScreenHeader title={t('insights.title')} subtitle={t('insights.subtitle')} />
 
         {i && (
           <>
             <Animated.View entering={FadeInDown.duration(300)} style={styles.statRow}>
-              <Stat styles={styles} value={formatMinutes(i.totalMinutes)} unit={hours ? 'hours' : 'minutes'} label="recorded" />
-              <Stat styles={styles} value={i.totalWords >= 10000 ? `${Math.round(i.totalWords / 1000)}k` : `${i.totalWords}`} unit="words" label="captured" />
               <Stat
                 styles={styles}
-                value={`${i.currentStreak}`}
-                unit={i.currentStreak === 1 ? 'day' : 'days'}
-                label="streak"
+                value={formatMinutes(i.totalMinutes)}
+                caption={hours ? t('insights.hoursRecorded') : t('insights.minutesRecorded')}
+              />
+              <Stat
+                styles={styles}
+                value={i.totalWords >= 10000 ? `${formatNumber(Math.round(i.totalWords / 1000))}k` : formatNumber(i.totalWords)}
+                caption={t('insights.wordsCaptured')}
+              />
+              <Stat
+                styles={styles}
+                value={formatNumber(i.currentStreak)}
+                caption={tp('insights.dayStreak', i.currentStreak)}
                 icon={i.currentStreak > 0 ? 'flame' : undefined}
                 iconColor={colors.tint}
               />
             </Animated.View>
 
+            <Animated.View entering={FadeInDown.delay(80).duration(300)} style={styles.card}>
+              <Text style={styles.cardTitle}>{t('insights.last14')}</Text>
+              <BarChart
+                bars={bars}
+                color={colors.tint}
+                mutedColor={colors.textMuted}
+                textColor={colors.text}
+                gridColor={colors.border}
+                unit={t('insights.minutesUnit')}
+              />
+            </Animated.View>
+
+            <Animated.View entering={FadeInDown.delay(140).duration(300)} style={styles.card}>
+              <Text style={styles.cardTitle}>{t('insights.glance')}</Text>
+              <View style={styles.glance}>
+                <Glance styles={styles} label={t('insights.notes')} value={formatNumber(i.totalNotes)} />
+                <Glance styles={styles} label={t('insights.recordings')} value={formatNumber(i.recordedNotes)} />
+                <Glance styles={styles} label={t('insights.summaries')} value={formatNumber(i.summariesGenerated)} />
+                <Glance styles={styles} label={t('insights.bestStreak')} value={formatNumber(i.longestStreak)} />
+              </View>
+            </Animated.View>
+
             <View>
-              <Animated.View entering={FadeInDown.delay(80).duration(300)} style={[styles.card, !isPro && styles.locked]} pointerEvents={isPro ? 'auto' : 'none'}>
-                <Text style={styles.cardTitle}>Last 14 days</Text>
-                <BarChart
-                  bars={bars}
-                  color={colors.tint}
-                  mutedColor={colors.textMuted}
-                  textColor={colors.text}
-                  gridColor={colors.border}
-                  unit="min"
-                />
-              </Animated.View>
-
-              <Animated.View entering={FadeInDown.delay(140).duration(300)} style={[styles.twoUp, !isPro && styles.locked]} pointerEvents={isPro ? 'auto' : 'none'}>
-                <View style={[styles.card, styles.half]}>
-                  <Ionicons name="time-outline" size={18} color={colors.tint} />
-                  <Text style={styles.bigNumber}>{i.minutesSaved}</Text>
-                  <Text style={styles.cardCaption}>minutes of typing saved</Text>
+              <View style={locked ? styles.locked : undefined} pointerEvents={locked ? 'none' : 'auto'}>
+                <View style={styles.twoUp}>
+                  <View style={[styles.card, styles.half]}>
+                    <Ionicons name="time-outline" size={18} color={colors.tint} />
+                    <Text style={styles.bigNumber}>{formatNumber(i.minutesSaved)}</Text>
+                    <Text style={styles.cardCaption}>{t('insights.typingSaved')}</Text>
+                  </View>
+                  <View style={[styles.card, styles.half]}>
+                    <Ionicons name="speedometer-outline" size={18} color={colors.tint} />
+                    <Text style={styles.bigNumber}>{i.avgWordsPerMinute !== null ? formatNumber(i.avgWordsPerMinute) : '—'}</Text>
+                    <Text style={styles.cardCaption}>{t('insights.wordsPerMinute')}</Text>
+                  </View>
                 </View>
-                <View style={[styles.card, styles.half]}>
-                  <Ionicons name="speedometer-outline" size={18} color={colors.tint} />
-                  <Text style={styles.bigNumber}>{i.avgWordsPerMinute ?? '—'}</Text>
-                  <Text style={styles.cardCaption}>words per minute</Text>
-                </View>
-              </Animated.View>
 
-              <Animated.View entering={FadeInDown.delay(200).duration(300)} style={[styles.card, !isPro && styles.locked]} pointerEvents={isPro ? 'auto' : 'none'}>
-                <Text style={styles.cardTitle}>When you record</Text>
-                <HourHeatmap byHour={i.byHour} color={colors.tint} emptyColor={colors.surface} mutedColor={colors.textMuted} />
-              </Animated.View>
-
-              <Animated.View entering={FadeInDown.delay(260).duration(300)} style={[styles.card, !isPro && styles.locked]} pointerEvents={isPro ? 'auto' : 'none'}>
-                <Text style={styles.cardTitle}>At a glance</Text>
-                <View style={styles.glance}>
-                  <Glance styles={styles} label="Notes" value={i.totalNotes} />
-                  <Glance styles={styles} label="Recordings" value={i.recordedNotes} />
-                  <Glance styles={styles} label="Summaries" value={i.summariesGenerated} />
-                  <Glance styles={styles} label="Best streak" value={i.longestStreak} />
+                <View style={styles.card}>
+                  <Text style={styles.cardTitle}>{t('insights.whenYouRecord')}</Text>
+                  <HourHeatmap
+                    byHour={i.byHour}
+                    color={colors.tint}
+                    emptyColor={colors.surface}
+                    mutedColor={colors.textMuted}
+                    formatHour={formatHour}
+                    accessibilityLabel={
+                      i.peakHour !== null ? t('insights.peakHour', { hour: formatHour(i.peakHour) }) : t('insights.noRecordings')
+                    }
+                  />
                 </View>
+
+                <View style={styles.card}>
+                  <Text style={styles.cardTitle}>{t('insights.byWeekday')}</Text>
+                  <BarChart
+                    bars={weekdayBars}
+                    color={colors.tint}
+                    mutedColor={colors.textMuted}
+                    textColor={colors.text}
+                    gridColor={colors.border}
+                    unit=""
+                  />
+                  {i.avgMinutesPerRecording !== null && (
+                    <Text style={[styles.cardCaption, { marginTop: Spacing.sm }]}>
+                      {t('insights.avgLength', { minutes: formatNumber(i.avgMinutesPerRecording) })}
+                    </Text>
+                  )}
+                </View>
+
                 {i.topTags.length > 0 && (
-                  <View style={styles.tags}>
-                    {i.topTags.map((t) => (
-                      <Chip key={t.tag} label={`#${t.tag} · ${t.count}`} tone="tint" onPress={() => router.navigate('/notes')} />
-                    ))}
+                  <View style={styles.card}>
+                    <Text style={styles.cardTitle}>{t('insights.topTags')}</Text>
+                    <View style={styles.tags}>
+                      {i.topTags.map((item) => (
+                        <Chip
+                          key={item.tag}
+                          label={`#${item.tag} · ${formatNumber(item.count)}`}
+                          tone="tint"
+                          onPress={() => router.navigate('/notes')}
+                        />
+                      ))}
+                    </View>
                   </View>
                 )}
-              </Animated.View>
+              </View>
 
-              {!isPro && (
+              {locked && (
                 <Pressable
                   style={styles.lockOverlay}
                   onPress={() => {
@@ -165,13 +265,13 @@ export default function InsightsScreen() {
                     router.push('/paywall');
                   }}
                   accessibilityRole="button"
-                  accessibilityLabel="Unlock Insights with Pro"
+                  accessibilityLabel={t('insights.lockTitle')}
                 >
                   <View style={styles.lockCard}>
                     <Ionicons name="lock-closed" size={20} color={colors.tint} />
-                    <Text style={styles.lockTitle}>Unlock Insights</Text>
-                    <Text style={styles.lockBody}>Charts, time saved, speaking pace and your recording habits.</Text>
-                    <Text style={styles.lockCta}>See Pro plans →</Text>
+                    <Text style={styles.lockTitle}>{t('insights.lockTitle')}</Text>
+                    <Text style={styles.lockBody}>{t('insights.lockBody')}</Text>
+                    <Text style={styles.lockCta}>{t('insights.lockCta')}</Text>
                   </View>
                 </Pressable>
               )}
@@ -186,36 +286,32 @@ export default function InsightsScreen() {
 function Stat({
   styles,
   value,
-  unit,
-  label,
+  caption,
   icon,
   iconColor,
 }: {
   styles: ReturnType<typeof createStyles>;
   value: string;
-  unit: string;
-  label: string;
+  caption: string;
   icon?: React.ComponentProps<typeof Ionicons>['name'];
   iconColor?: string;
 }) {
   return (
-    <View style={styles.stat} accessible accessibilityLabel={`${value} ${unit} ${label}`}>
+    <View style={styles.stat} accessible accessibilityLabel={`${value} ${caption}`}>
       <View style={styles.statValueRow}>
         {icon && <Ionicons name={icon} size={18} color={iconColor} />}
         <Text style={styles.statValue}>{value}</Text>
       </View>
-      <Text style={styles.statUnit}>
-        {unit} {label}
-      </Text>
+      <Text style={styles.statUnit}>{caption}</Text>
     </View>
   );
 }
 
-function Glance({ styles, label, value }: { styles: ReturnType<typeof createStyles>; label: string; value: number }) {
+function Glance({ styles, label, value }: { styles: ReturnType<typeof createStyles>; label: string; value: string }) {
   return (
-    <View style={styles.glanceItem}>
+    <View style={styles.glanceItem} accessible accessibilityLabel={`${label}: ${value}`}>
       <Text style={styles.glanceValue}>{value}</Text>
-      <Text style={styles.cardCaption}>{label}</Text>
+      <Text style={[styles.cardCaption, { textAlign: 'center' }]}>{label}</Text>
     </View>
   );
 }
@@ -224,7 +320,7 @@ function createStyles(colors: typeof Colors.light) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
     headerPad: { paddingHorizontal: Spacing.xl, paddingTop: Spacing.lg },
-    content: { paddingHorizontal: Spacing.xl, paddingTop: Spacing.lg, paddingBottom: 140, gap: Spacing.md },
+    content: { paddingHorizontal: Spacing.xl, paddingTop: Spacing.lg, paddingBottom: Spacing.xxl, gap: Spacing.md },
     statRow: { flexDirection: 'row', gap: Spacing.sm },
     stat: { flex: 1, backgroundColor: colors.card, borderRadius: Radius.lg, padding: Spacing.md, ...Shadow.sm },
     statValueRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
@@ -239,9 +335,9 @@ function createStyles(colors: typeof Colors.light) {
     glance: { flexDirection: 'row', justifyContent: 'space-between' },
     glanceItem: { alignItems: 'center', flex: 1 },
     glanceValue: { fontSize: FontSize.lg, fontWeight: '800', color: colors.text, fontVariant: ['tabular-nums'] },
-    tags: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginTop: Spacing.lg },
-    locked: { opacity: 0.25 },
-    lockOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', paddingTop: 80 },
+    tags: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+    locked: { opacity: 0.22 },
+    lockOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', paddingTop: 56 },
     lockCard: {
       backgroundColor: colors.card,
       borderRadius: Radius.xl,

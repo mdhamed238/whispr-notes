@@ -40,20 +40,18 @@ export const STREAMING_CONFIG = {
   VAD_DETECTION_MARGIN_MS: 300,
 } as const;
 
-// Notes list limits
+// Recording limits
 export const UI_CONFIG = {
-  // Audio is now streamed to disk as it arrives (see services/wavEncoder),
-  // so stopping is a 44-byte header patch rather than a full synchronous
-  // encode — length is bounded by disk space, not the JS heap. This cap is
-  // now just a runaway guard for a recording left running by accident.
+  // Audio is streamed to disk as it arrives (see services/wavEncoder), so
+  // length is bounded by disk space, not the JS heap (about 115 MB an hour).
+  // The free cap is a runaway guard for a recording left running by accident;
+  // Pro raises it for long meetings and lectures.
   MAX_RECORDING_DURATION_SECONDS: 3600,
-} as const;
-
-// User-facing error messages for failure paths that are actually wired up
-export const ERROR_MESSAGES = {
-  MICROPHONE_PERMISSION_DENIED:
-    'Microphone permission is required to record audio. Please enable it in Settings.',
-  RECORDING_FAILED: 'Failed to start recording. Please try again.',
+  MAX_RECORDING_DURATION_SECONDS_PRO: 3 * 3600,
+  // While recording, only the end of a long live transcript is drawn: laying
+  // out tens of thousands of words on every update is what made long
+  // sessions stutter. The full text is shown once recording stops.
+  LIVE_TRANSCRIPT_TAIL_CHARS: 1200,
 } as const;
 
 // Public contact for support, privacy and legal requests.

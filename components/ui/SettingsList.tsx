@@ -3,7 +3,7 @@
  */
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import { StyleSheet, Switch, Text, View } from 'react-native';
+import { I18nManager, StyleSheet, Switch, Text, View } from 'react-native';
 
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
@@ -83,7 +83,9 @@ export function SettingsRow({
           accessibilityLabel={label}
         />
       ) : (
-        onPress && chevron && <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        onPress && chevron && (
+          <Ionicons name={I18nManager.isRTL ? 'chevron-back' : 'chevron-forward'} size={18} color={colors.textMuted} />
+        )
       )}
     </View>
   );

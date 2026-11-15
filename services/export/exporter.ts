@@ -6,9 +6,10 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { getLocaleTag, t } from '../../i18n';
 import type { Note } from '../../types';
 import { loadTimeline } from '../timelineStore';
-import { ExportScope, slugify, toMarkdown, toSrt, toText } from './generators';
+import { type ExportLabels, ExportScope, slugify, toMarkdown, toSrt, toText } from './generators';
 import { buildPdfHtml } from './pdfTemplate';
 
 export type ExportFormat = 'pdf' | 'md' | 'txt' | 'srt' | 'audio';
@@ -28,6 +29,20 @@ const UTI: Partial<Record<ExportFormat, string>> = {
   audio: 'com.microsoft.waveform-audio',
 };
 
+/** Section names in the interface language. */
+export function exportLabels(): ExportLabels {
+  return {
+    summary: t('export.label.summary'),
+    keyPoints: t('export.label.keyPoints'),
+    actionItems: t('export.label.actionItems'),
+    decisions: t('export.label.decisions'),
+    transcript: t('export.label.transcript'),
+    tags: t('export.label.tags'),
+    madeWith: t('export.label.madeWith'),
+    aiDisclaimer: t('export.label.aiDisclaimer'),
+  };
+}
+
 export function exportDirectory(): Directory {
   const dir = new Directory(Paths.cache, 'exports');
   if (!dir.exists) dir.create({ intermediates: true, idempotent: true });
@@ -44,7 +59,10 @@ export function writeExportFile(fileName: string, content: string | Uint8Array):
 
 /** Text-based exports. */
 export async function exportTextFile(note: Note, format: 'txt' | 'srt', scope: ExportScope = 'full'): Promise<string> {
-  const content = format === 'txt' ? toText(note, { scope }) : toSrt(note, await loadTimeline(note.id));
+  const content =
+    format === 'txt'
+      ? toText(note, { scope, labels: exportLabels(), locale: getLocaleTag() })
+      : toSrt(note, await loadTimeline(note.id));
   return writeExportFile(`${slugify(note.title)}.${format}`, content);
 }
 
@@ -60,11 +78,13 @@ export async function exportNote(
       return exportTextFile(note, format, o.scope);
     case 'md': {
       const segments = o.timestamps ? await loadTimeline(note.id) : null;
-      return writeExportFile(`${name}.md`, toMarkdown(note, { ...o, segments }));
+      return writeExportFile(`${name}.md`, toMarkdown(note, { ...o, segments, labels: exportLabels() }));
     }
     case 'pdf': {
       const segments = o.timestamps ? await loadTimeline(note.id) : null;
-      const { uri } = await Print.printToFileAsync({ html: buildPdfHtml(note, { ...o, segments }) });
+      const { uri } = await Print.printToFileAsync({
+        html: buildPdfHtml(note, { ...o, segments, labels: exportLabels(), locale: getLocaleTag() }),
+      });
       // Give the PDF a readable name instead of the printer's random one.
       const target = new File(exportDirectory(), `${name}.pdf`);
       if (target.exists) target.delete();

@@ -32,3 +32,28 @@ test('does not finish before a pending final stream update', async () => {
   finish();
   expect(await task).toBe('First. Last.');
 });
+
+describe('continuing after a pause', () => {
+  const { joinTranscript } = require('../services/liveTranscription');
+
+  test('text from before the pause stays in front of the new stream', async () => {
+    const updates: { committed: string; nonCommitted: string }[] = [];
+    async function* stream() {
+      yield { committed: result(''), nonCommitted: result('and then') };
+      yield { committed: result('And then we left.'), nonCommitted: result('') };
+    }
+    const text = await consumeLiveTranscript(stream(), (update) => updates.push(update), 'We arrived early.');
+    expect(updates[0]).toEqual({ committed: 'We arrived early.', nonCommitted: 'and then' });
+    expect(updates[1]).toEqual({ committed: 'We arrived early. And then we left.', nonCommitted: '' });
+    expect(text).toBe('We arrived early. And then we left.');
+  });
+
+  test('joining never doubles or drops the space', () => {
+    expect(joinTranscript('', 'Hello')).toBe('Hello');
+    expect(joinTranscript('Hello', '')).toBe('Hello');
+    expect(joinTranscript('Hello', 'there')).toBe('Hello there');
+    expect(joinTranscript('Hello ', 'there')).toBe('Hello there');
+    expect(joinTranscript('Hello', ' there')).toBe('Hello there');
+    expect(joinTranscript('今日は', '会議です', true)).toBe('今日は会議です');
+  });
+});

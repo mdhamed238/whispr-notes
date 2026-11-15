@@ -8,21 +8,33 @@
  */
 import { LLMModule, models, type Message } from 'react-native-executorch/legacy';
 
+import { getAppLanguage } from '../../i18n';
+import type { Note } from '../../types';
 import * as notesRepo from '../db/notesRepo';
 import { isProNow } from '../billing/entitlement';
 import { summaryAllowance } from '../billing/quota';
 import { peekSettings, updateSettings } from '../settings';
+import { type QaTurn, buildAskMessages } from './ask';
 import { detectTier } from './device';
 import { registerJobRunner } from './enhanceQueue';
-import { buildMergeMessages, buildSummaryMessages, buildTitleMessages, chunkTranscript, countWords } from './prompts';
+import { resolveSummaryLanguage } from './language';
+import {
+  type SummaryOptions,
+  buildMergeMessages,
+  buildSummaryMessages,
+  buildTitleMessages,
+  chunkTranscript,
+  countWords,
+} from './prompts';
 import { cleanTitle, parseSummaryResponse, stripThinking } from './summaryParser';
+import { DEFAULT_SUMMARY_STYLE, type SummaryStyle } from './summaryStyles';
 import { chooseLlm, type LlmId } from './tiers';
 
 const IDLE_UNLOAD_MS = 60_000;
 /** Below this there's nothing worth summarizing. */
 const MIN_WORDS_FOR_SUMMARY = 25;
 
-export type SummaryPhase = 'idle' | 'loading-model' | 'summarizing' | 'merging' | 'titling';
+export type SummaryPhase = 'idle' | 'loading-model' | 'summarizing' | 'merging' | 'titling' | 'answering';
 export interface SummaryState {
   phase: SummaryPhase;
   /** Model download progress while loading (0..1). */
@@ -141,11 +153,25 @@ export function stop(noteId: string): void {
 
 const wordCount = countWords;
 
+/** Style, language and instructions for a note's summary. Extras beyond the defaults are Pro. */
+function summaryOptionsFor(note: Note, styleOverride?: SummaryStyle): Required<Pick<SummaryOptions, 'style'>> & SummaryOptions {
+  const settings = peekSettings();
+  const pro = isProNow();
+  return {
+    style: pro ? (styleOverride ?? settings.summaryStyle) : DEFAULT_SUMMARY_STYLE,
+    language: resolveSummaryLanguage(settings.summaryLanguage, note.language, getAppLanguage(), pro),
+    instructions: pro ? settings.summaryInstructions : '',
+  };
+}
+
 /**
  * Writes a full summary (and, while the title is still machine-written, an
  * AI title). Throws when there's too little text to summarize.
  */
-export async function summarize(noteId: string, o: { onlyIfMissing?: boolean } = {}): Promise<void> {
+export async function summarize(
+  noteId: string,
+  o: { onlyIfMissing?: boolean; style?: SummaryStyle } = {}
+): Promise<void> {
   await withLlm(async () => {
     // Read inside the lock: another run may have just written a summary or
     // used the last free one while this waited.
@@ -158,24 +184,25 @@ export async function summarize(noteId: string, o: { onlyIfMissing?: boolean } =
     }
     activeNoteId = noteId;
     interrupted = false;
+    const options = summaryOptionsFor(note, o.style);
     try {
       const module = await getLlm(noteId);
-      const chunks = chunkTranscript(note.transcription);
+      const chunks = chunkTranscript(note.transcription, undefined, note.language);
       let raw: string;
       if (chunks.length === 1) {
         setState(noteId, { phase: 'summarizing', partial: '', step: null });
-        raw = await generate(module, noteId, buildSummaryMessages(chunks[0], 'single'));
+        raw = await generate(module, noteId, buildSummaryMessages(chunks[0], 'single', options));
         throwIfStopped();
       } else {
         const partials: string[] = [];
         for (let i = 0; i < chunks.length; i++) {
           setState(noteId, { phase: 'summarizing', partial: '', step: { index: i + 1, total: chunks.length } });
-          const part = await generate(module, noteId, buildSummaryMessages(chunks[i], 'partial'));
+          const part = await generate(module, noteId, buildSummaryMessages(chunks[i], 'partial', options));
           throwIfStopped();
           partials.push(stripThinking(part));
         }
         setState(noteId, { phase: 'merging', partial: '', step: null });
-        raw = await generate(module, noteId, buildMergeMessages(partials));
+        raw = await generate(module, noteId, buildMergeMessages(partials, options));
         throwIfStopped();
       }
 
@@ -186,7 +213,7 @@ export async function summarize(noteId: string, o: { onlyIfMissing?: boolean } =
       const latest = await notesRepo.getNote(noteId);
       if (!latest) return;
       await notesRepo.updateNote(noteId, {
-        summary,
+        summary: { ...summary, style: options.style },
         ...(latest.titleIsAuto && title ? { title } : {}),
       });
       await updateSettings({ summaryLog: [...peekSettings().summaryLog, new Date().toISOString()].slice(-50) });
@@ -209,13 +236,49 @@ export async function generateTitle(noteId: string, force = false): Promise<void
     try {
       const module = await getLlm(noteId);
       setState(noteId, { phase: 'titling', partial: '' });
-      const raw = await generate(module, noteId, buildTitleMessages(note.transcription));
+      const language = resolveSummaryLanguage(peekSettings().summaryLanguage, note.language, getAppLanguage(), isProNow());
+      const raw = await generate(module, noteId, buildTitleMessages(note.transcription, language));
       throwIfStopped();
       const title = cleanTitle(stripThinking(raw).split('\n')[0] ?? '');
       const latest = await notesRepo.getNote(noteId);
       if (title && latest && (latest.titleIsAuto || force)) {
         await notesRepo.updateNote(noteId, { title, titleIsAuto: true });
       }
+    } finally {
+      activeNoteId = null;
+      interrupted = false;
+      setState(noteId, { phase: 'idle' });
+      scheduleUnload();
+    }
+  });
+}
+
+/**
+ * Answers a question about a note from its transcript (Pro). Stopping keeps
+ * what was written so far, so a stopped answer still resolves.
+ */
+export async function ask(noteId: string, question: string, history: QaTurn[] = []): Promise<string> {
+  return withLlm(async () => {
+    if (!isProNow()) throw new Error('Asking about a note is part of Pro');
+    const note = await notesRepo.getNote(noteId);
+    if (!note) throw new Error('Note not found');
+    activeNoteId = noteId;
+    interrupted = false;
+    try {
+      const module = await getLlm(noteId);
+      setState(noteId, { phase: 'answering', partial: '', step: null });
+      const raw = await generate(
+        module,
+        noteId,
+        buildAskMessages({
+          transcript: note.transcription,
+          summary: note.summary,
+          question,
+          history,
+          language: note.language,
+        })
+      );
+      return stripThinking(raw).trim();
     } finally {
       activeNoteId = null;
       interrupted = false;

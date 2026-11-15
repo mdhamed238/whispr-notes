@@ -5,6 +5,7 @@ import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { FontSize, Spacing } from '@/constants/Spacing';
 import { Radius } from '@/constants/theme';
+import { useI18n } from '@/i18n';
 
 import AnimatedPressable from './AnimatedPressable';
 
@@ -22,6 +23,7 @@ interface Props {
 export default function Chip({ label, onPress, onRemove, tone = 'tint', selected, style, textStyle }: Props) {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+  const { t } = useI18n();
 
   const bg = selected ? colors.tint : tone === 'tint' ? `${colors.tint}1A` : colors.surface;
   const fg = selected ? colors.onAccent : tone === 'tint' ? colors.tint : colors.textMuted;
@@ -46,7 +48,7 @@ export default function Chip({ label, onPress, onRemove, tone = 'tint', selected
         <Text
           onPress={onRemove}
           accessibilityRole="button"
-          accessibilityLabel={`Remove ${label}`}
+          accessibilityLabel={t('common.remove', { name: label })}
           suppressHighlighting
           style={{ color: fg, fontSize: FontSize.sm, fontWeight: '700', paddingLeft: 2 }}
         >

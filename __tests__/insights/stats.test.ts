@@ -88,3 +88,27 @@ describe('computeInsights', () => {
     expect(computeInsights([note(day(0), { transcription: words })], now).minutesSaved).toBe(4);
   });
 });
+
+describe('stored word counts and weekday habits', () => {
+  test('list rows are counted from their stored word count, without a transcript', () => {
+    const rows = [
+      { source: 'recording' as const, duration: 120, createdAt: day(0), tags: ['a'], wordCount: 300, hasSummary: true },
+      { source: 'import' as const, duration: 0, createdAt: day(0), tags: [], wordCount: 50, hasSummary: false },
+    ];
+    const i = computeInsights(rows, now);
+    expect(i.totalWords).toBe(350);
+    expect(i.avgWordsPerMinute).toBe(150);
+    expect(i.summariesGenerated).toBe(1);
+    expect(i.avgMinutesPerRecording).toBe(2);
+  });
+
+  test('recordings are grouped by weekday and the busiest hour is reported', () => {
+    // 10 Mar 2026 is a Tuesday.
+    const i = computeInsights([note(day(0, 9)), note(day(0, 9)), note(day(-1, 14))], now);
+    expect(i.byWeekday[2]).toBe(2);
+    expect(i.byWeekday[1]).toBe(1);
+    expect(i.peakHour).toBe(9);
+    expect(computeInsights([], now).peakHour).toBeNull();
+    expect(computeInsights([], now).avgMinutesPerRecording).toBeNull();
+  });
+});

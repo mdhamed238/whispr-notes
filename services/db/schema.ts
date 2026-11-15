@@ -61,6 +61,12 @@ export const MIGRATIONS: string[] = [
     PRIMARY KEY (note_id, kind)
   );
   `,
+  // v2 → v3: word count per note, so lists and statistics never have to load
+  // full transcripts. Existing rows are counted once by notesRepo (the count
+  // is script-aware, which SQL can't do).
+  `
+  ALTER TABLE notes ADD COLUMN word_count INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

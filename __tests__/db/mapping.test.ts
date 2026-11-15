@@ -114,3 +114,42 @@ describe('buildUpdate', () => {
     expect(setClause).not.toMatch(/\bid = /);
   });
 });
+
+describe('word counts and list rows', () => {
+  const { rowToListItem } = require('../../services/db/mapping');
+
+  test('rows carry a word count derived from the transcript', () => {
+    expect(noteToRow(makeNote()).word_count).toBe(6);
+    expect(noteToRow(makeNote({ transcription: '今日は会議' })).word_count).toBe(5);
+  });
+
+  test('changing the transcript updates the count in the same statement', () => {
+    const { sql, params } = buildUpdate('42', { transcription: 'one two three' }, new Date('2026-02-01T00:00:00.000Z'));
+    expect(sql).toContain('transcription = ?, word_count = ?');
+    expect(params.slice(0, 2)).toEqual(['one two three', 3]);
+    expect(buildUpdate('42', { title: 'x' }, new Date()).sql).not.toContain('word_count');
+  });
+
+  test('a list row prefers the summary overview as its snippet', () => {
+    const base = {
+      id: '1', title: 'T', duration: 12, tags_json: '["a"]', pinned: 1, created_at: '2026-01-02T10:00:00.000Z',
+      language: 'fr', source: 'recording', enhancement: 'running', word_count: 9, has_audio: 1, has_summary: 1,
+      snippet: 'raw  transcript\nstart', summary_snippet: 'The overview.',
+    };
+    expect(rowToListItem(base)).toMatchObject({
+      id: '1', snippet: 'The overview.', hasSummary: true, hasAudio: true, tags: ['a'], pinned: true,
+      language: 'fr', enhancement: 'running', wordCount: 9,
+    });
+    expect(rowToListItem({ ...base, has_summary: 0, summary_snippet: null }).snippet).toBe('raw transcript start');
+    expect(rowToListItem({ ...base, snippet: null, summary_snippet: null, tags_json: 'oops', enhancement: 'weird' })).toMatchObject({
+      snippet: '', tags: [], enhancement: 'none',
+    });
+  });
+
+  test('a stored summary keeps its style', () => {
+    const note = makeNote();
+    const withStyle = { ...note, summary: { ...note.summary!, style: 'lecture' } };
+    expect(rowToNote(noteToRow(withStyle)).summary?.style).toBe('lecture');
+    expect(rowToNote(noteToRow(note)).summary).not.toHaveProperty('style');
+  });
+});

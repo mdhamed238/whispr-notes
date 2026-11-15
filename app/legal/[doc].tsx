@@ -10,18 +10,21 @@ import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { Spacing } from '@/constants/Spacing';
 import { LEGAL_DOCS, type LegalDoc } from '@/content/legal';
+import { useI18n, type TKey } from '@/i18n';
 
-const TITLES: Record<LegalDoc, string> = { privacy: 'Privacy Policy', terms: 'Terms of Use', data: "What's stored" };
+// The documents themselves are in English: they are the legally binding text.
+const TITLES: Record<LegalDoc, TKey> = { privacy: 'legal.privacy', terms: 'legal.terms', data: 'legal.data' };
 
 export default function LegalScreen() {
   const { doc } = useLocalSearchParams<{ doc: string }>();
   const colors = Colors[useColorScheme() ?? 'light'];
+  const { t } = useI18n();
   const key = (doc && doc in LEGAL_DOCS ? doc : null) as LegalDoc | null;
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-      <ModalHeader title={key ? TITLES[key] : 'Document'} />
+      <ModalHeader title={key ? t(TITLES[key]) : ''} />
       <ScrollView contentContainerStyle={{ padding: Spacing.xl, paddingTop: Spacing.sm, paddingBottom: Spacing.xxl * 2 }}>
-        {key ? <Markdown source={LEGAL_DOCS[key]} skipTitle /> : <Text style={{ color: colors.textMuted }}>Document not found.</Text>}
+        {key ? <Markdown source={LEGAL_DOCS[key]} skipTitle /> : <Text style={{ color: colors.textMuted }}>{t('legal.notFound')}</Text>}
       </ScrollView>
     </SafeAreaView>
   );

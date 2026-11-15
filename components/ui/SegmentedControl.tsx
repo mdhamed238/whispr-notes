@@ -2,7 +2,7 @@
  * Two-to-four option segmented control with a sliding thumb.
  */
 import React, { useState } from 'react';
-import { LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
+import { I18nManager, LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle, withSpring } from 'react-native-reanimated';
 
 import { useColorScheme } from '@/components/useColorScheme';
@@ -25,9 +25,11 @@ export default function SegmentedControl<T extends string>({
   const index = Math.max(0, options.findIndex((o) => o.value === value));
   const segment = options.length > 0 ? (width - 8) / options.length : 0;
 
+  // `left` is mirrored in RTL but a transform is not, so the offset flips sign.
+  const offset = index * segment * (I18nManager.isRTL ? -1 : 1);
   const thumbStyle = useAnimatedStyle(() => ({
     width: segment,
-    transform: [{ translateX: withSpring(index * segment, { damping: 20, stiffness: 260 }) }],
+    transform: [{ translateX: withSpring(offset, { damping: 20, stiffness: 260 }) }],
   }));
 
   return (

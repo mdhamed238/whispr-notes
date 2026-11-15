@@ -8,6 +8,7 @@
  */
 import { createDownloadTask, directories, getExistingDownloadTasks } from '@kesha-antonov/react-native-background-downloader';
 import { Directory, File, Paths } from 'expo-file-system';
+import { Platform } from 'react-native';
 
 import { MODEL_CATALOG, ModelId } from './modelCatalog';
 import { isDownloadComplete } from './tiers';
@@ -17,7 +18,9 @@ export type ModelStatus = 'absent' | 'downloading' | 'ready';
 type Listener = (id: ModelId, status: ModelStatus, progress: number) => void;
 const listeners = new Set<Listener>();
 const progressById = new Map<ModelId, number>();
-const active = new Map<ModelId, { stop: () => Promise<void> }>();
+const active = new Map<ModelId, { stop: () => Promise<void>; cancel: () => void }>();
+/** One promise per running download, so every caller waits on the same one. */
+const inflight = new Map<ModelId, Promise<void>>();
 
 export function subscribeModels(listener: Listener): () => void {
   listeners.add(listener);
@@ -49,7 +52,7 @@ export function modelPath(id: ModelId): string | null {
 }
 
 export function status(id: ModelId): ModelStatus {
-  if (active.has(id)) return 'downloading';
+  if (active.has(id) || inflight.has(id)) return 'downloading';
   const file = modelFile(id);
   return file?.exists ? 'ready' : 'absent';
 }
@@ -58,12 +61,49 @@ export function progress(id: ModelId): number {
   return progressById.get(id) ?? 0;
 }
 
-export async function download(id: ModelId): Promise<void> {
+/**
+ * Downloads a model, or joins the download already running for it. Resolves
+ * once the model is installed; rejects if the download fails or is cancelled.
+ */
+export function download(id: ModelId): Promise<void> {
+  const running = inflight.get(id);
+  if (running) return running;
+  const task = startDownload(id).finally(() => inflight.delete(id));
+  inflight.set(id, task);
+  return task;
+}
+
+/** Makes sure a model is installed, downloading it if needed. */
+export async function ensure(id: ModelId): Promise<void> {
+  if (status(id) === 'ready') return;
+  await download(id);
+}
+
+/**
+ * Models can be downloaded again, so they must not fill the user's iCloud
+ * backup (Apple's data storage guidelines). Covers the models WhisprNotes
+ * fetches and the ones ExecuTorch fetches. Android's exclusions are static
+ * (plugins/withBackupRules.js).
+ */
+export async function excludeModelsFromBackup(): Promise<void> {
+  if (Platform.OS !== 'ios') return;
+  try {
+    const { default: BlobUtil } = await import('react-native-blob-util');
+    for (const name of ['models', 'react-native-executorch']) {
+      const dir = new Directory(Paths.document, name);
+      if (dir.exists) await BlobUtil.ios.excludeFromBackupKey(decodeURI(dir.uri.replace(/^file:\/\//, '')));
+    }
+  } catch (error) {
+    console.warn('Could not exclude models from backup:', error);
+  }
+}
+
+async function startDownload(id: ModelId): Promise<void> {
   const info = MODEL_CATALOG[id];
   if (info.delivery !== 'manual' || !info.url || !info.fileName) {
     throw new Error(`${id} is downloaded automatically when first used`);
   }
-  if (status(id) !== 'absent') return;
+  if (status(id) === 'ready') return;
 
   // Resume tracking of a download that survived an app restart.
   const existing = (await getExistingDownloadTasks()).find((t) => t.id === id);
@@ -98,6 +138,7 @@ export async function download(id: ModelId): Promise<void> {
           if (final.exists) final.delete();
           await part.move(final);
           notify(id, 'ready', 1);
+          void excludeModelsFromBackup();
           resolve();
         } catch (error) {
           notify(id, 'absent', 0);
@@ -111,7 +152,7 @@ export async function download(id: ModelId): Promise<void> {
         reject(new Error(error));
       });
 
-    active.set(id, { stop: () => task.stop() });
+    active.set(id, { stop: () => task.stop(), cancel: () => reject(new Error('Download cancelled')) });
     notify(id, 'downloading', 0);
     task.start();
   });
@@ -120,7 +161,11 @@ export async function download(id: ModelId): Promise<void> {
 export async function cancelDownload(id: ModelId): Promise<void> {
   const task = active.get(id);
   active.delete(id);
-  await task?.stop();
+  // The downloader fires no callback for a stopped task; settle it here so
+  // anything waiting on the download (and the next attempt) can move on.
+  task?.cancel();
+  inflight.delete(id);
+  await task?.stop().catch(() => undefined);
   const info = MODEL_CATALOG[id];
   if (info.fileName) {
     const part = new File(modelsDir(), `${info.fileName}.part`);

@@ -1,24 +1,25 @@
 # Privacy Policy
 
-**Effective date:** November 13, 2026
+**Effective date:** November 15, 2026
 
 WhisprNotes is made by Mohamed Hamed, an independent developer ("I", "me"). This policy explains what happens to your information when you use the WhisprNotes app.
 
 ## The short version
 
 - Your recordings, transcripts, summaries and notes are processed and stored **only on your phone**. They are never uploaded to me or to anyone else.
-- There is **no account**, **no analytics**, **no advertising** and **no tracking**.
+- There is **no account**, **no analytics**, **no advertising** and **no tracking**. The app contains no analytics or crash-reporting component at all.
 - The app uses the internet for exactly two things: **downloading AI models** the first time they're needed, and **in-app purchases**. Neither one sends your notes or recordings anywhere.
+- Once the models are downloaded, everything works **offline**, including in airplane mode.
 
 ## What is stored on your phone
 
-- Audio recordings you make.
+- Audio recordings you make or import.
 - Transcripts, titles, tags, summaries and notes you import or write.
 - Word timings and waveform data used for playback.
-- Your settings (for example haptics, language and model preferences) and the number of AI summaries used this week.
+- Your settings (for example language, haptics and model preferences) and the number of AI summaries used this week.
 - The AI models the app downloads.
 
-All of this lives in the app's private storage on your device. I have no access to it.
+All of this lives in the app's private storage on your device. I have no access to it. Questions you ask about a note ("Ask this note") are answered on your phone and are not saved.
 
 ## What uses the internet
 
@@ -27,6 +28,12 @@ All of this lives in the app's private storage on your device. I have no access 
 **Purchases.** Payments for WhisprNotes Pro are handled by Apple (App Store) or Google (Google Play). The app uses RevenueCat, Inc. to verify purchases and restore them on your devices. RevenueCat receives a random, anonymous app user ID created on your device, your purchase receipts, your device and OS type, and your IP address and country. It does not receive your name, email, recordings or notes. See the [RevenueCat privacy policy](https://www.revenuecat.com/privacy). I can see anonymous purchase records (for example, that a lifetime purchase was made) but cannot link them to you.
 
 **Sharing and exporting.** When you share or export a note or recording, it goes only to the app or person you choose, under their own privacy terms.
+
+**Links you open.** The Support, Feedback and legal links in Settings open the WhisprNotes website in your browser, only when you tap them. The app sends nothing with them.
+
+## Feedback
+
+Feedback is optional and never collected by the app. If you want to tell me something, the feedback form on the WhisprNotes website prepares an email in your own mail app, which you can read and edit before sending. I receive only what you choose to write, plus your email address so I can reply. I use it to answer you and to improve the app, and I don't share it. The website itself uses no cookies, scripts or analytics.
 
 ## What I don't do
 
@@ -40,7 +47,7 @@ The app uses the microphone only while you are recording. Audio is turned into t
 
 ## Backups
 
-If your phone's system backup (iCloud or Google backup) is turned on, the app's data may be included in that backup according to your device settings and your backup provider's terms. You can turn this off in your device settings.
+If your phone's system backup (iCloud or Google backup) is turned on, the app's notes and settings may be included in that backup according to your device settings and your backup provider's terms. Downloaded AI models are excluded because they can be downloaded again. On Android, recordings are not included in cloud backups (they are too large) but are copied when you transfer directly to a new phone. You can turn backups off in your device settings.
 
 ## Keeping and deleting your data
 
@@ -52,11 +59,11 @@ WhisprNotes is not directed at children under 13 (or under 16 in the European Ec
 
 ## Your rights
 
-Depending on where you live (for example under the GDPR or CCPA), you may have rights to access, correct or delete personal data. Because your notes and recordings never leave your phone, you control them directly in the app. For purchase records held by Apple, Google or RevenueCat, contact them, or contact me and I'll help.
+Depending on where you live (for example under the GDPR or CCPA), you may have rights to access, correct or delete personal data, and to object to its use. Because your notes and recordings never leave your phone, you control them directly in the app. For purchase records held by Apple, Google or RevenueCat, contact them, or contact me and I'll help. If you emailed me feedback, I'll delete it on request.
 
 ## Security
 
-Your data is kept in the app's sandboxed storage, protected by your phone's own security and encryption. Purchase traffic is encrypted in transit (HTTPS).
+Your data is kept in the app's sandboxed storage, protected by your phone's own security and encryption. Everything the app sends over the internet is encrypted in transit (HTTPS).
 
 ## Changes to this policy
 

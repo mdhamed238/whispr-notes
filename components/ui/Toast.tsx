@@ -1,5 +1,5 @@
 /**
- * Non-blocking feedback ("Note deleted · Undo") shown above the tab bar.
+ * Non-blocking feedback ("Note deleted · Undo") shown just above the tab bar.
  * Replaces Alert for anything that doesn't need a decision.
  */
 import { Ionicons } from '@expo/vector-icons';
@@ -85,7 +85,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           key={toast.key}
           entering={reduceMotion ? FadeIn.duration(150) : SlideInDown.springify().damping(18)}
           exiting={reduceMotion ? FadeOut.duration(150) : SlideOutDown.duration(180)}
-          style={[styles.wrap, { bottom: insets.bottom + 96 }]}
+          style={[styles.wrap, { bottom: insets.bottom + 76 }]}
           pointerEvents="box-none"
         >
           <View style={styles.toast} accessibilityLiveRegion="polite" accessibilityRole="alert">

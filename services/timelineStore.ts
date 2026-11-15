@@ -30,6 +30,21 @@ function isSafeId(noteId: string): boolean {
   return /^[A-Za-z0-9_-]+$/.test(noteId);
 }
 
+/**
+ * The last few timelines read or written, parsed. A note's screen reloads
+ * on every write to its note (autosave, pin, a summary landing), and an
+ * hour-long recording's timeline is around half a megabyte of JSON; without
+ * this each reload read and parsed the file again.
+ */
+const CACHE_SIZE = 3;
+const cache = new Map<string, TranscriptSegment[] | null>();
+
+function remember(noteId: string, segments: TranscriptSegment[] | null): void {
+  cache.delete(noteId);
+  cache.set(noteId, segments);
+  if (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value as string);
+}
+
 function timelineDirectory(): Directory {
   return new Directory(Paths.document, TIMELINE_DIR_NAME);
 }
@@ -56,7 +71,9 @@ export function saveTimeline(noteId: string, segments: TranscriptSegment[]): voi
     const file = timelineFile(noteId);
     file.create({ overwrite: true });
     file.write(JSON.stringify(segments));
+    remember(noteId, segments.length > 0 ? segments : null);
   } catch (error) {
+    cache.delete(noteId);
     console.warn('Failed to save transcript timeline:', error);
   }
 }
@@ -68,13 +85,19 @@ export function saveTimeline(noteId: string, segments: TranscriptSegment[]): voi
  */
 export async function loadTimeline(noteId: string): Promise<TranscriptSegment[] | null> {
   if (!isSafeId(noteId)) return null;
+  if (cache.has(noteId)) return cache.get(noteId) ?? null;
 
   try {
     const file = timelineFile(noteId);
-    if (!file.exists) return null;
+    if (!file.exists) {
+      remember(noteId, null);
+      return null;
+    }
 
     const parsed = JSON.parse(await file.text());
-    return Array.isArray(parsed) && parsed.length > 0 ? (parsed as TranscriptSegment[]) : null;
+    const segments = Array.isArray(parsed) && parsed.length > 0 ? (parsed as TranscriptSegment[]) : null;
+    remember(noteId, segments);
+    return segments;
   } catch (error) {
     console.warn('Failed to read transcript timeline:', error);
     return null;
@@ -84,6 +107,7 @@ export async function loadTimeline(noteId: string): Promise<TranscriptSegment[] 
 /** Removes a note's timeline. Safe to call when there isn't one. */
 export function deleteTimeline(noteId: string): void {
   if (!isSafeId(noteId)) return;
+  remember(noteId, null);
 
   try {
     const file = timelineFile(noteId);
