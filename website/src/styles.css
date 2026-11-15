@@ -135,6 +135,18 @@ footer nav { display: flex; gap: 18px; flex-wrap: wrap; }
 .contact { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 20px 22px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
 .contact code { font: 700 17px/1.4 var(--body); user-select: all; }
 
+/* Feedback form: plain HTML, submitted to mailto: (no script, no server). */
+.feedback { display: grid; gap: 8px; margin-block: 28px 12px; }
+.feedback label { font-weight: 700; font-size: 15px; margin-top: 14px; }
+.feedback .optional { color: var(--muted); font-weight: 500; }
+.feedback select, .feedback textarea, .feedback input { width: 100%; min-height: 48px; font: inherit; color: var(--text); background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+.feedback textarea { resize: vertical; min-height: 170px; }
+.feedback select:focus-visible, .feedback textarea:focus-visible, .feedback input:focus-visible { outline: 3px solid var(--coral); outline-offset: 2px; }
+.feedback .hint { color: var(--muted); font-size: 14px; margin: 2px 0 0; }
+.feedback button { justify-self: start; min-height: 48px; margin-top: 18px; padding: 14px 22px; font: 700 16px/1 var(--body); color: #fff; background: #c53d25; border: 0; border-radius: 14px; cursor: pointer; }
+.feedback button:hover { background: #b23520; }
+.doc code { font-weight: 700; user-select: all; }
+
 @media (max-width: 860px) {
   .hero { grid-template-columns: 1fr; gap: 40px; padding-top: 24px; }
   .pillars, .grid { grid-template-columns: 1fr; }

@@ -46,7 +46,7 @@ const layout = ({ title, description, body, path }) => `<!doctype html>
   <main>${body}</main>
   <footer>
     <div>© ${YEAR} Mohamed Hamed. WhisprNotes is made by an independent developer.</div>
-    <nav aria-label="Legal"><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/support">Support</a></nav>
+    <nav aria-label="Legal"><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/support">Support</a><a href="/feedback">Feedback</a></nav>
   </footer>
 </div>
 </body>
@@ -67,12 +67,12 @@ const home = `
   <div>
     <span class="eyebrow">On-device AI · No cloud</span>
     <h1>Your meetings, transcribed and summarized. <em>On your phone.</em></h1>
-    <p class="lede">Studio-grade Whisper Large-v3 transcripts and AI summaries that never leave your device. No account, no uploads, no tracking.</p>
+    <p class="lede">Studio-grade Whisper Large-v3 transcripts and AI summaries that never leave your device. No account, no uploads, no ads.</p>
     <div class="cta-row">
       <span class="store">${appleIcon}<span><small>Coming soon on the</small>App Store</span></span>
       <span class="store">${playIcon}<span><small>Coming soon on</small>Google Play</span></span>
     </div>
-    <div class="trust"><span>Works in airplane mode</span><span>99 languages</span><span>No account</span></div>
+    <div class="trust"><span>Works in airplane mode</span><span>App in 20 languages</span><span>No account</span></div>
   </div>
   <div class="phone" role="img" aria-label="WhisprNotes showing a meeting note with a summary and action items">
     <div class="screen">
@@ -93,20 +93,23 @@ const home = `
     <p>Everything that usually happens on someone else's server happens on your phone instead.</p>
   </div>
   <div class="pillars">
-    <article class="pillar"><div class="ico" aria-hidden="true">🎙️</div><h3>Large-v3 accuracy</h3><p>OpenAI's Whisper Large-v3 Turbo runs on capable phones for near-human transcripts in 99 languages, with a live preview while you speak.</p></article>
-    <article class="pillar"><div class="ico" aria-hidden="true">✨</div><h3>Meeting summaries</h3><p>Key points, action items with owners, and decisions, written by an on-device AI the moment your recording ends. Titles too.</p></article>
-    <article class="pillar"><div class="ico" aria-hidden="true">🔒</div><h3>Private by design</h3><p>Your voice and notes stay on your phone. No account, no analytics, no ads. Nothing to leak, nothing to sell.</p></article>
+    <article class="pillar"><div class="ico" aria-hidden="true">🎙️</div><h3>Large-v3 accuracy</h3><p>OpenAI's Whisper Large-v3 Turbo runs on capable phones for near-human transcripts in 99 languages. Every phone transcribes 37 languages for free, and reasonably fast phones show a live preview as you speak.</p></article>
+    <article class="pillar"><div class="ico" aria-hidden="true">✨</div><h3>Meeting summaries</h3><p>Key points, action items with owners, and decisions, written by an on-device AI the moment your recording ends, in the language you spoke. Titles too.</p></article>
+    <article class="pillar"><div class="ico" aria-hidden="true">🔒</div><h3>Private by design</h3><p>Your voice and notes stay on your phone. No account, no analytics, no ads, nothing uploaded. The app goes online only to download its AI models and for purchases.</p></article>
   </div>
 </section>
 
 <section>
   <div class="grid">
     <div><h4>Tap any word to replay it</h4><p>Every word is linked to the audio. Jump straight to the moment that matters.</p></div>
+    <div><h4>Ask your notes</h4><p>Ask a question about any note and get the answer from its transcript, on your phone.</p></div>
+    <div><h4>Transcribe audio files</h4><p>Turn voice memos, lectures and call recordings into searchable notes.</p></div>
     <div><h4>Share it your way</h4><p>Branded PDF, Markdown, text, subtitles or the original audio.</p></div>
     <div><h4>Bring your notes</h4><p>Import from Notion, Obsidian, Bear, Evernote, Markdown and text files.</p></div>
     <div><h4>Search everything</h4><p>Full-text search across transcripts, summaries and tags.</p></div>
     <div><h4>Insights</h4><p>Streaks, speaking pace and the hours of typing you've saved.</p></div>
     <div><h4>Works offline</h4><p>After a one-time model download, no connection needed. Ever.</p></div>
+    <div><h4>Pause and resume</h4><p>Take a break mid-meeting. Paused time isn't recorded.</p></div>
   </div>
 </section>
 
@@ -130,10 +133,11 @@ const home = `
       <h3>Free</h3>
       <div class="price">$0</div>
       <ul>
-        <li>Unlimited recording with live transcription</li>
+        <li>Unlimited recording, transcribed in 37 languages</li>
         <li>AI titles for every note</li>
         <li>3 AI summaries a week</li>
-        <li>Search, tags and text export</li>
+        <li>Search, tags, text and Markdown export</li>
+        <li>Import from other apps and full backup</li>
       </ul>
     </div>
     <div class="plan pro">
@@ -142,10 +146,11 @@ const home = `
       <div style="color:var(--muted);font-size:15px">Lifetime Pro · No subscription · USD base price; local store prices vary</div>
       <ul>
         <li>Whisper Large-v3 accuracy, 99 languages</li>
-        <li>Unlimited AI summaries</li>
-        <li>PDF, Markdown, subtitles and audio export</li>
-        <li>Import from other apps and full backup</li>
-        <li>Insights</li>
+        <li>Unlimited AI summaries in five styles, with your own instructions</li>
+        <li>Ask questions about any note</li>
+        <li>Transcribe audio files; record up to 3 hours</li>
+        <li>PDF, subtitles and audio export</li>
+        <li>Full Insights</li>
       </ul>
     </div>
   </div>
@@ -153,10 +158,11 @@ const home = `
 
 <section>
   <div class="section-head"><h2>Questions</h2></div>
-  <details><summary>Is my audio ever uploaded?</summary><p>No. Recording, transcription and summaries all run on your phone. The app only goes online to download its AI models once and to process purchases.</p></details>
+  <details><summary>Is my audio ever uploaded?</summary><p>No. Recording, transcription and summaries all run on your phone. The app goes online only to download its AI models once and to process purchases. It has no analytics and no crash reporting.</p></details>
   <details><summary>Which phones does it run on?</summary><p>iPhone with iOS 17 or later, and 64-bit Android phones. Phones with 8 GB of memory or more (like a Galaxy S23 Ultra) run Whisper Large-v3; others use a smaller model automatically.</p></details>
   <details><summary>Does it work without internet?</summary><p>Yes. After the first model download, everything works in airplane mode.</p></details>
   <details><summary>Is Pro a subscription?</summary><p>No. Pro is a one-time lifetime purchase with a $4.99 USD base price. Your local store price is shown before you buy. Restore your purchase with the same App Store or Google Play account.</p></details>
+  <details><summary>How do I send feedback?</summary><p>Use the <a href="/feedback">feedback form</a>. It's optional, and it opens an email in your own mail app, so you see exactly what is sent. The app itself never collects feedback or usage data.</p></details>
   <details><summary>Do I need to tell people I'm recording?</summary><p>Yes. Recording laws differ by country and often require everyone's consent. Always ask first.</p></details>
 </section>
 `;
@@ -164,7 +170,7 @@ const home = `
 const support = `
 <article class="doc">
   <h1>Support</h1>
-  <p>Questions, bug reports or feature ideas? Email me and I'll reply as soon as I can, usually within two working days.</p>
+  <p>Questions, bug reports or feature ideas? Use the <a href="/feedback">feedback form</a> or email me, and I'll reply as soon as I can, usually within two working days.</p>
   <div class="contact"><code>${EMAIL}</code><span style="color:var(--muted);font-size:14px">Copy the address into your mail app</span></div>
   <h2>Common questions</h2>
   <p><strong>Restore a purchase:</strong> Settings → Upgrade to Pro → Restore purchase, signed in to the same App Store or Google Play account you bought with.</p>
@@ -173,15 +179,48 @@ const support = `
   <p>Please don't email recordings or private notes; describe the problem instead.</p>
 </article>`;
 
+// The form has no backend and the site runs no scripts. It submits to a
+// mailto: address, which opens the visitor's own mail app with the fields
+// filled in as the message; nothing is sent until they press Send there.
+// POST + text/plain is the form encoding browsers turn into a readable
+// email body ("Field=value" per line). The site's Content-Security-Policy
+// (vercel.json) allows exactly this form target and nothing else.
+const feedbackSubject = encodeURIComponent('WhisprNotes feedback');
+const feedback = `
+<article class="doc">
+  <h1>Send feedback</h1>
+  <p>Found a bug, missing a feature, or want to say what works well? This form is optional. WhisprNotes itself never collects feedback or usage data, so this is the only way I hear from you.</p>
+  <form class="feedback" action="mailto:${EMAIL}?subject=${feedbackSubject}" method="post" enctype="text/plain">
+    <label for="fb-topic">What is it about?</label>
+    <select id="fb-topic" name="Topic">
+      <option>Something isn't working</option>
+      <option>An idea or feature request</option>
+      <option>Transcription or summary quality</option>
+      <option>Languages and translation</option>
+      <option>Something else</option>
+    </select>
+    <label for="fb-message">Your message</label>
+    <textarea id="fb-message" name="Message" rows="8" required></textarea>
+    <label for="fb-device">Phone and app version <span class="optional">(optional)</span></label>
+    <input id="fb-device" name="Phone and app version" type="text" autocomplete="off" placeholder="Galaxy S23, Android 15, app 1.0.0">
+    <p class="hint">The app version is in Settings → Version. Please don't paste private notes or recordings; describe the problem instead.</p>
+    <button type="submit">Continue in my mail app</button>
+  </form>
+  <h2>What happens when you press the button</h2>
+  <p>Nothing you type is sent to this website. The button opens a new email in your own mail app with your message filled in. You can read and change it, and it is sent only when you press Send there. I receive your message and your email address, so I can reply, and nothing else.</p>
+  <p>No mail app on this device? Write to <code>${EMAIL}</code> instead.</p>
+</article>`;
+
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(dist, { recursive: true });
 for (const f of ['styles.css', 'logo.svg', 'favicon.png', 'og.png']) copyFileSync(join(src, f), join(dist, f));
 
 const pages = [
-  ['index.html', { path: '/', title: 'WhisprNotes: private, on-device meeting notes', description: 'Whisper Large-v3 transcripts and AI meeting summaries that run entirely on your phone. No account, no cloud, no tracking.', body: home }],
+  ['index.html', { path: '/', title: 'WhisprNotes: private, on-device meeting notes', description: 'Whisper Large-v3 transcripts and AI meeting summaries that run entirely on your phone. No account, no cloud, no ads.', body: home }],
   ['privacy.html', { path: '/privacy', title: 'Privacy Policy · WhisprNotes', description: 'How WhisprNotes handles your data: it stays on your phone.', body: `<article class="doc">${html(md('privacy'))}</article>` }],
   ['terms.html', { path: '/terms', title: 'Terms of Use · WhisprNotes', description: 'The terms for using WhisprNotes and WhisprNotes Pro.', body: `<article class="doc">${html(md('terms'))}</article>` }],
   ['support.html', { path: '/support', title: 'Support · WhisprNotes', description: 'Get help with WhisprNotes.', body: support }],
+  ['feedback.html', { path: '/feedback', title: 'Send feedback · WhisprNotes', description: 'Optional feedback form for WhisprNotes. It opens an email in your own mail app.', body: feedback }],
 ];
 for (const [file, page] of pages) writeFileSync(join(dist, file), layout(page));
 console.log(`Built ${pages.length} pages into website/dist`);
