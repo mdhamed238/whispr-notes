@@ -126,7 +126,7 @@
           ]
         }
       ],
-      "versionCode": 2
+      "versionCode": 4
     },
     "web": {
       "bundler": "metro",
