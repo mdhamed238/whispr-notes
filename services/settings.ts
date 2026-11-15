@@ -12,24 +12,27 @@ export type { Settings } from './settingsModel';
 const KEY = 'settings.v1';
 
 let current: Settings = DEFAULT_SETTINGS;
-let loaded: Promise<Settings> | null = null;
+let loaded: Promise<void> | null = null;
 const listeners = new Set<(settings: Settings) => void>();
 
+/**
+ * The settings as they are now, once they have been read from storage.
+ *
+ * Not the value storage held at launch: a screen that mounts after a change
+ * (the record screen does after every Save and Reset) must not fall back to
+ * the language, or anything else, the app started with.
+ */
 export function getSettings(): Promise<Settings> {
-  if (!loaded) {
-    loaded = AsyncStorage.getItem(KEY)
-      .then((raw) => {
-        current = mergeSettings(raw ? JSON.parse(raw) : undefined);
-        listeners.forEach((listener) => listener(current));
-        return current;
-      })
-      .catch((error) => {
-        console.warn('Failed to read settings; using defaults:', error);
-        current = DEFAULT_SETTINGS;
-        return current;
-      });
-  }
-  return loaded;
+  loaded ??= AsyncStorage.getItem(KEY)
+    .then((raw) => {
+      current = mergeSettings(raw ? JSON.parse(raw) : undefined);
+      listeners.forEach((listener) => listener(current));
+    })
+    .catch((error) => {
+      console.warn('Failed to read settings; using defaults:', error);
+      current = DEFAULT_SETTINGS;
+    });
+  return loaded.then(() => current);
 }
 
 /** Last loaded settings, synchronously. Defaults until `getSettings` resolves. */
